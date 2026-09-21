@@ -41,10 +41,10 @@ credenziale reale — i connector mock arrivano in Milestone 4.
 | Connector | Uso | Note |
 |---|---|---|
 | Amazon SP-API | non usato dall'Amazon Scout | account-scoped, rilevante da Agent 02 in poi |
-| Keepa | discovery | richiede API key propria |
-| Jungle Scout | discovery | API self-serve |
-| Perpetua (ex-Sellics) | discovery | probabilmente ridondante se già presenti Keepa+JS |
-| Helium 10 | discovery | API solo su piano Enterprise, accesso via sales, non self-serve |
+| Keepa | discovery | non disponibile per Dinamik — deprioritizzato |
+| Jungle Scout | discovery | non disponibile per Dinamik — deprioritizzato |
+| Perpetua (ex-Sellics) | discovery | non disponibile per Dinamik — deprioritizzato |
+| **Helium 10** | discovery | **confermato come unico tool disponibile (21/09) — connector prioritario.** Resta da verificare se il piano include l'API Enterprise o solo l'accesso da dashboard |
 
 ## Sviluppo
 
