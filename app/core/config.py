@@ -164,6 +164,16 @@ class Settings(BaseSettings):
     def score_weights(self) -> dict[str, float]:
         return dict(self.yaml_config.get("scoring", {}).get("weights", {}))
 
+    def opportunity_rule_config(self, rule_name: str) -> dict[str, Any]:
+        """One entry of config/default.yaml's `opportunity_rules:` section
+        (Milestone 8) — e.g. `opportunity_rule_config("amazon_opportunity")`.
+        Returns {} for an unknown rule name rather than raising: unlike
+        provider_config() (where a missing entry means the registry has
+        nothing to route on — a wiring bug), a missing rule config here
+        just means that rule's evaluator falls back to its own in-code
+        defaults, which is a safe, working state, not a bug to surface."""
+        return dict(self.yaml_config.get("opportunity_rules", {}).get(rule_name, {}))
+
     def provider_configs(self) -> dict[str, ProviderConfig]:
         """Every entry under config/default.yaml's `providers:` section
         (deep-merged with the environment override, same as everything

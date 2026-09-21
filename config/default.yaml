@@ -29,6 +29,21 @@ scoring:
       - incomplete_information
       - ai_inference
 
+# Milestone 8: thresholds for app/services/opportunity_engine.py's
+# deterministic rules. Only two of the six OpportunityType values
+# (amazon_opportunity, business_value) have real rules today -- the other
+# four need data this pipeline doesn't produce yet (listing content,
+# ad-sponsorship signals, brand website WEBSITE_DATA, Seller-Fast-specific
+# fit criteria that were never specified). See the module's own docstring.
+opportunity_rules:
+  amazon_opportunity:
+    min_rating_threshold: 4.2
+    min_review_count_threshold: 50
+  business_value:
+    product_count_medium_threshold: 3
+    product_count_high_threshold: 8
+    review_count_high_threshold: 500
+
 retry:
   network_error:
     max_attempts: 3

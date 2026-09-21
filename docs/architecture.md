@@ -490,3 +490,80 @@ richiesta, e un test end-to-end contro Postgres che verifica "Acme Co"/
 "Acme AG" NON vengono uniti ma vengono segnalati con similarità 1.0.
 **116/116 test totali verdi** (113 + 3), `ruff`/`mypy app tests` puliti,
 `alembic check` senza operazioni pendenti (nessuna modifica di schema).
+
+## Addendum 2026-09-21 (11) — Milestone 8: Opportunity engine
+
+`app/services/opportunity_engine.py`, nuovo. Regole deterministiche, no
+AI. **Solo 2 dei 6 valori di `OpportunityType` sono davvero implementati:
+`AMAZON_OPPORTUNITY` e `BUSINESS_VALUE`.** `config/default.yaml`'s
+`scoring.weights` ha già una voce per tutte e sei (compito di Milestone 9,
+che consuma righe `Score` — questo modulo non le scrive) ma un peso già
+presente in config per un futuro step di scoring non è la stessa cosa di
+"questa milestone sa valutare quella dimensione oggi". Le altre quattro
+richiedono dati che questa pipeline non produce ancora:
+
+- `LISTING_OPPORTUNITY` — servirebbe `AmazonListing` (bullet point, A+
+  content, conteggio immagini/video): nessuna riga `AmazonListing` esiste
+  da nessuna parte in questa pipeline, le capability di arricchimento di
+  Milestone 5 non la toccano.
+- `ADVERTISING_OPPORTUNITY` — stesso gap (`AmazonListing.sponsored_seen`
+  o dati ads reali).
+- `WEBSITE_OPPORTUNITY` — servirebbe `WEBSITE_DATA` (l'unico provider
+  reale del progetto, vedi `docs/providers.md`) chiamato sul sito del
+  brand scoperto: niente collega quel provider alla pipeline Amazon
+  Scout, e discovery non impara mai l'URL di un brand
+  (`Brand.website` resta `NULL` da Milestone 5 in poi).
+- `SELLER_FAST_FIT` — servirebbero i criteri di fit reali per il servizio
+  "Seller Fast" di Dinamik, mai specificati né nel documento di refactor
+  né in questo file — inventarli sarebbe indovinare i criteri di business
+  di Frank, peggio che non costruirlo.
+
+Costruire regole segnaposto per questi quattro avrebbe prodotto righe
+`Opportunity` che sembrano valutate ma non sono ancorate a nulla — peggio
+che non averle.
+
+- **`evaluate_amazon_opportunity`**: segnale di margine di miglioramento
+  da dati prodotto reali — rating medio sotto soglia e/o base recensioni
+  sottile nonostante il prodotto sia arricchito per davvero. HIGH se
+  entrambe le condizioni scattano, MEDIUM se una, NONE se nessuna;
+  `insufficient_product_data` se nessun prodotto ha un rating (dato reale
+  distinto da "mai valutato", non silenziato).
+- **`evaluate_business_value`**: proxy grezzo di dimensione/valore
+  potenziale da conteggio prodotti e volume recensioni — non fatturato,
+  perché Milestone 5 non chiama mai `PRODUCT_PRICE` (`price`/`currency`
+  restano `NULL`). Non ritorna mai NONE per un brand con prodotti: anche
+  un brand a un solo prodotto è un business reale, per quanto piccolo.
+- Soglie in `config/default.yaml`'s nuova sezione `opportunity_rules:`
+  (`Settings.opportunity_rule_config()`, stesso pattern di `score_weights()`).
+- **`Opportunity` trattata come serie temporale append-only**, come
+  `AgentEvent` — nessun vincolo unique su `(brand_id, opportunity_type)`
+  nello schema; rieseguire il motore scrive righe nuove, non aggiorna
+  quelle esistenti, così un futuro consumer (CLI/API, non ancora
+  costruito) può vedere come una valutazione è cambiata nel tempo. Stessa
+  logica per cui `Score` (non toccato da questa milestone) è pensato.
+- Un brand valutato riceve sempre una riga per tipo implementato, anche a
+  livello `NONE` ("valutato, nessun segnale") — stesso principio di
+  `AmazonProvider._search()` per una categoria senza risultati. L'unico
+  caso senza alcuna riga è un brand con zero `AmazonProduct` collegati:
+  niente da valutare, nemmeno un risultato nullo.
+- Brand `MERGED` (Milestone 7) esclusi dalla valutazione — i loro figli
+  sono già stati ripuntati al canonico, valutare di nuovo la riga morta
+  sarebbe valutare dati stantii.
+- Cap `max_brands=200`, stesso pattern di `resolve_research_job`/
+  `run_brand_deduplication`.
+
+**Verifica eseguita**: 18 nuovi test — 11 unitari puri sulle due funzioni
+di regola (nessun DB: le istanze `AmazonProduct`/`AmazonSeller` non
+vengono mai salvate, solo usate come contenitori di attributi), poi contro
+Postgres reale: creazione righe per un brand con prodotti, nessuna riga
+per un brand senza prodotti, esclusione dei brand `MERGED`, natura
+append-only su esecuzioni ripetute, cap `max_brands`/`truncated`,
+un'eccezione non gestita catturata al confine dell'agent-run, e un test
+end-to-end reale Milestone 5 → 6 → 8 sul fixture mock con valori noti
+verificati esattamente contro le soglie reali di config (rating medio e
+volume recensioni sani → `AMAZON_OPPORTUNITY` NONE; volume recensioni
+altissimo del fixture — 3113 — supera la soglia `review_count_high=500`
+da solo → `BUSINESS_VALUE` HIGH). **134/134 test totali verdi** (116 +
+18), `ruff`/`mypy app tests` puliti, `alembic check` senza operazioni
+pendenti (nessuna modifica di schema — `Opportunity` esiste già dalla
+Milestone 2).
