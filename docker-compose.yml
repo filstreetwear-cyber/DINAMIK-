@@ -1,0 +1,109 @@
+# Phase J (Docker/VPS) — refactor doc: "docker-compose, browser-worker,
+# volumes, healthchecks". What's here matches what actually exists in the
+# codebase today, not what Milestone 14 (Workers + scheduler) will
+# eventually add:
+#
+# * postgres, redis — real infra dependencies already in pyproject.toml/
+#   .env.example (REDIS_URL is read today even though nothing consumes a
+#   queue yet — celery is a declared dependency, app/workers/celery_app.py
+#   does not exist).
+# * api — the FastAPI app (app/main.py). Runs migrations on boot via
+#   scripts/docker-entrypoint-api.sh, then serves the app.
+# * browser-worker — a separate image with a real Chromium install (see
+#   Dockerfile.browser-worker) and its own persistent volume for
+#   BROWSER_PROFILES_DIR, so a human login survives a redeploy. Its
+#   process (app/workers/browser_worker.py) is a healthcheck today, not a
+#   task consumer — see that file's own docstring for why a fake consumer
+#   isn't here instead.
+#
+# Deliberately NOT here: a `worker`/celery service. Defining one against a
+# celery_app module that doesn't exist yet would be exactly the kind of
+# "looks done, isn't" shortcut this project has committed to not taking.
+# That service is Milestone 14's to add, once there's a real task to run.
+services:
+  postgres:
+    image: postgres:16-alpine
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: dinamik
+      POSTGRES_PASSWORD: dinamik
+      POSTGRES_DB: dinamik_amazon_intelligence
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U dinamik -d dinamik_amazon_intelligence"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+  redis:
+    image: redis:7-alpine
+    restart: unless-stopped
+    volumes:
+      - redis_data:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+  api:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    restart: unless-stopped
+    env_file:
+      - .env
+    environment:
+      # Override .env's localhost-oriented defaults with the compose
+      # network's service hostnames — env_file values are supplied first,
+      # this block wins on conflicting keys.
+      DATABASE_URL: postgresql+asyncpg://dinamik:dinamik@postgres:5432/dinamik_amazon_intelligence
+      REDIS_URL: redis://redis:6379/0
+    ports:
+      - "8000:8000"
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8000/health"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 15s
+
+  browser-worker:
+    build:
+      context: .
+      dockerfile: Dockerfile.browser-worker
+    restart: unless-stopped
+    # Deliberately NOT `env_file: .env` — this container drives a real
+    # browser and listens on its own port; it gets only the settings it
+    # actually reads, not ANTHROPIC_API_KEY/AMAZON_API_SECRET/
+    # HELIUM10_API_KEY/etc. wholesale. Same "never hand out secrets a
+    # component doesn't need" discipline the spec already applies to what
+    # ToolCall logs (section 13), applied here to what a container is even
+    # handed.
+    environment:
+      MOCK_MODE: ${MOCK_MODE:-true}
+      ENVIRONMENT: ${ENVIRONMENT:-production}
+      LOG_LEVEL: ${LOG_LEVEL:-INFO}
+      BROWSER_HEADLESS: ${BROWSER_HEADLESS:-true}
+      BROWSER_PROFILES_DIR: /data/browser_profiles
+    volumes:
+      - browser_profiles:/data/browser_profiles
+    ports:
+      - "8100:8100"
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8100/health"]
+      interval: 15s
+      timeout: 10s
+      retries: 5
+      start_period: 20s
+
+volumes:
+  postgres_data:
+  redis_data:
+  browser_profiles:

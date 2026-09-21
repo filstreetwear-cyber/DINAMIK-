@@ -124,6 +124,14 @@ class Settings(BaseSettings):
     # locally it defaults to a repo-relative, gitignored folder.
     browser_profiles_dir: str = Field(default="data/browser_profiles", alias="BROWSER_PROFILES_DIR")
     browser_headless: bool = Field(default=True, alias="BROWSER_HEADLESS")
+    # 2026-09-21 (Phase J): the engine's hardcoded /opt/pw-browsers/chromium
+    # default is THIS SANDBOX's own convention (a stable symlink some setup
+    # step created), not something `playwright install` produces on a bare
+    # VPS/Docker image. Left unset, nothing changes — the engine still
+    # falls back to that same hardcoded default. Set it when the
+    # browser-worker image installs Chromium somewhere else and creates its
+    # own equivalent symlink (see Dockerfile.browser-worker).
+    browser_executable_path: str | None = Field(default=None, alias="BROWSER_EXECUTABLE_PATH")
 
     # populated from YAML after construction, not an env var
     yaml_config: dict[str, Any] = Field(default_factory=dict, exclude=True)

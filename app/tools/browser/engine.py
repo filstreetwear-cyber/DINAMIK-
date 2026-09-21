@@ -38,11 +38,11 @@ from app.models.enums import BrowserTaskStatus
 from app.tools.browser.session import BrowserSessionHandle
 from app.tools.browser.task import BrowserTaskOutcome, BrowserTaskSpec
 
-# The pre-installed Chromium in this project's environments is reached via
-# a stable symlink (see the environment's own guidance: launch with this
-# executable_path instead of letting Playwright try to download a browser,
-# which fails in a network-restricted sandbox and is unnecessary when a
-# compatible browser is already provisioned).
+# The pre-installed Chromium in THIS development sandbox is reached via a
+# stable symlink at this exact path. Kept as the hardcoded fallback so
+# nothing here changes when BROWSER_EXECUTABLE_PATH (Phase J,
+# app/core/config.py) is unset — real deployments (the browser-worker
+# Docker image) override it via that setting instead of this constant.
 _DEFAULT_EXECUTABLE_PATH = "/opt/pw-browsers/chromium"
 
 _SUPPORTED_TASK_TYPES = frozenset({"fetch_rendered_html", "check_requires_login"})
@@ -125,9 +125,28 @@ class PlaywrightBrowserAutomationEngine(BrowserAutomationEngine):
 
 
 def default_executable_path_exists() -> bool:
-    """Cheap check used at startup/health time to decide whether the real
-    engine can even be constructed, before attempting a launch."""
+    """Cheap check against THIS SANDBOX's own hardcoded default only — kept
+    as-is (tests/test_browser_mock.py's skip condition depends on this
+    exact check). For the path the running system is actually configured
+    to use, see browser_engine_available() below."""
     return Path(_DEFAULT_EXECUTABLE_PATH).exists()
+
+
+def _resolve_executable_path(settings: Settings) -> str:
+    """BROWSER_EXECUTABLE_PATH overrides the sandbox default when set
+    (Phase J: the browser-worker Docker image installs Chromium at a path
+    Playwright itself chooses, then symlinks it to match this convention —
+    see Dockerfile.browser-worker); unset, behavior is unchanged from
+    Phase F."""
+    return settings.browser_executable_path or _DEFAULT_EXECUTABLE_PATH
+
+
+def browser_engine_available(settings: Settings | None = None) -> bool:
+    """Like default_executable_path_exists(), but honors a configured
+    BROWSER_EXECUTABLE_PATH — this is what build_browser_engine() and the
+    browser-worker healthcheck (Phase J) actually rely on."""
+    settings = settings or get_settings()
+    return Path(_resolve_executable_path(settings)).exists()
 
 
 def build_browser_engine(settings: Settings | None = None) -> BrowserAutomationEngine:
@@ -138,6 +157,8 @@ def build_browser_engine(settings: Settings | None = None) -> BrowserAutomationE
     from app.tools.browser.mock_engine import MockBrowserAutomationEngine
 
     settings = settings or get_settings()
-    if settings.mock_mode or not default_executable_path_exists():
+    if settings.mock_mode or not browser_engine_available(settings):
         return MockBrowserAutomationEngine()
-    return PlaywrightBrowserAutomationEngine(headless=settings.browser_headless)
+    return PlaywrightBrowserAutomationEngine(
+        executable_path=_resolve_executable_path(settings), headless=settings.browser_headless
+    )

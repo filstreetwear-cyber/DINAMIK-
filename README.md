@@ -1,6 +1,6 @@
 # Dinamik Advisor — Amazon Intelligence Platform
 
-**Stato attuale: Milestone 1+2 completate. Refactor "Helium10 Optional + Provider/Capability" — Phase A (audit), B (database), C (Capability/Provider/Registry/Orchestrator), D (Amazon/Keepa provider), E (Website: HTTP + HTML + JS/Browser fallback), F (Browser Automation Engine, Playwright, verificato reale) e H (Orchestrator: cost awareness, confidence, availability) completate. Phase G (Helium10) sospesa su tua decisione. Phase I / Milestone 5 (Amazon Scout discovery) completata — vedi sotto. Vedi `docs/architecture.md` (addendum 21/09) e `docs/refactor-audit-2026-09-21.md`.**
+**Stato attuale: Milestone 1+2 completate. Refactor "Helium10 Optional + Provider/Capability" — Phase A (audit), B (database), C (Capability/Provider/Registry/Orchestrator), D (Amazon/Keepa provider), E (Website: HTTP + HTML + JS/Browser fallback), F (Browser Automation Engine, Playwright, verificato reale), H (Orchestrator: cost awareness, confidence, availability) e J (Docker/VPS) completate. Phase G (Helium10) sospesa su tua decisione. Phase I / Milestone 5 (Amazon Scout discovery) completata. Build/run reali delle immagini Docker non verificabili in questo sandbox (nessun demone Docker) — vedi `docs/architecture.md` addendum (6). Vedi `docs/architecture.md` (addendum 21/09) e `docs/refactor-audit-2026-09-21.md`.**
 
 Piattaforma proprietaria di Dinamik Advisor per l'individuazione, analisi e
 qualificazione di brand/seller Amazon con margine di crescita commerciale.
@@ -60,6 +60,15 @@ make test
 make lint
 ```
 
+## Deployment (Docker/VPS)
+
+```bash
+cp .env.example .env   # valorizza le credenziali reali prima del deploy
+docker compose up --build -d
+```
+
+Quattro servizi: `postgres`, `redis`, `api` (esegue le migration Alembic all'avvio, poi serve `app.main:app` su `:8000`), `browser-worker` (immagine separata con Chromium reale via Playwright, volume dedicato `browser_profiles` così un login umano sopravvive a un redeploy, healthcheck su `:8100/health`). Nessun servizio `worker`/celery ancora — `app/workers/celery_app.py` non esiste (Milestone 14). Vedi `docs/architecture.md` addendum (6) per i dettagli e il limite onesto: build/run reali non sono state verificate in questo sandbox di sviluppo (nessun demone Docker disponibile) — solo `docker compose config`, `shellcheck` e la logica applicativa via `pytest`. Verifica end-to-end reale (build immagini, avvio compose) da fare sulla VPS assegnata.
+
 ## Milestone
 
 - [x] 1 — Repository + architecture + config
@@ -79,5 +88,5 @@ make lint
 - [ ] 15 — Exports
 - [ ] 16 — Auditor package
 - [ ] 17 — Tests
-- [ ] 18 — Docker
+- [x] 18 — Docker — sostituita dal refactor Phase J: `docker-compose.yml`, `Dockerfile` (api), `Dockerfile.browser-worker`, volumi, healthcheck; build/run reali da verificare sulla VPS (vedi sezione Deployment sopra)
 - [ ] 19 — Documentation
