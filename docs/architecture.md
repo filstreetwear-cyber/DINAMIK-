@@ -762,3 +762,65 @@ puliti su 10 nuovi file (`app/ai/provider.py`, `contracts.py`,
 modifica di schema — scelta deliberata). Costo reale di questa milestone:
 **€0** — nessuna chiave API richiesta, nessuna chiamata a un provider
 cloud, `ai.cloud.enabled: false` per default.
+
+## Addendum (15) — 21/09: Milestone 10 — AI layer (wiring reale, senza spec dettagliata da Fil)
+
+A differenza di 8.5 e 9.5, Fil non ha fornito una spec dettagliata per
+questa milestone — solo "continua con la prossima" dopo aver rimandato
+l'accesso VPS a stasera. Ambito quindi dedotto dai riferimenti reali già
+sparsi nel codice (`Score`'s docstring: "deterministic scoring engine +
+validated AI signals"; `config/default.yaml`'s `scoring.confidence.
+decrease_on: [..., ai_inference]`; `AmazonSeller.verified`'s docstring:
+"the BrandResolver, rules first, then AI"; `brand_deduplication.py`'s
+riferimento a una futura review AI dei `duplicate_candidate`), non
+inventato da zero.
+
+**Costruito**: il primo caller reale di `AIAnalyst` (Milestone 9.5).
+`app/services/ai_analysis_engine.py` — stesso pattern batch/`AgentRun`/
+`max_brands`/`truncated` di `opportunity_engine.py`/`scoring_engine.py`:
+per ogni brand `ACTIVE`, legge le sue `Evidence` reali (stessa catena
+`ResearchResult.brand_id` di `scoring_engine.py`, ma righe complete non
+solo id, capped a 20 per brand più recenti — `ai.local.num_ctx: 2048` è un
+budget di contesto reale, non un dettaglio ignorabile), le passa a
+`AIAnalyst.analyze()`, persiste ogni `AIClaim` risultante nella nuova
+tabella `ai_claims` (`app/models/ai_claim.py`, migrazione
+`cc2851ec8377`). Un brand senza `Evidence` non viene nemmeno mandato
+all'AI (spreco di uno slot di generazione su una VPS da 4GB con
+`max_concurrency: 1`). Un fallimento AI per un singolo brand
+(AI_UNAVAILABLE/MODEL_UNAVAILABLE/AI_TIMEOUT/VALIDATION_ERROR) viene
+loggato come `ErrorLog` (categoria `AI_ERROR`) e non ferma il batch per
+gli altri brand — `INSUFFICIENT_EVIDENCE` invece non produce un
+`ErrorLog`, è un esito legittimo, non un errore. `ai.enabled: false` è un
+no-op pulito e documentato (`AgentRun` SUCCESS, `ai_disabled: True`), non
+un crash.
+
+**Deliberatamente NON costruito in questo passaggio** — stessa disciplina
+"gap documentato, non criterio inventato" di ogni milestone precedente:
+
+- **Blending del confidence di `Score` con i segnali AI** (`ai_inference`
+  in `scoring.confidence.decrease_on`): non esiste una specifica di COME
+  un `AIClaim` dovrebbe influenzare la confidenza di uno `Score`
+  deterministico — inventarla ora avrebbe rischiato i 13 test di
+  `scoring_engine.py` che asseriscono valori di confidenza esatti (es.
+  `85.0`) senza un guadagno specificato. `opportunity_engine.py` e
+  `scoring_engine.py` restano invariati, non toccati da questa milestone.
+- **Conferma AI di `AmazonSeller.verified`**: prefigurata nel docstring
+  del modello ma non implementata — stessa ragione.
+- **Review AI dei `duplicate_candidate` di `brand_deduplication.py`**:
+  idem.
+
+Tutti e tre riusano esattamente la stessa forma di chiamata
+(`AIAnalyst.analyze()` su un set di evidenza diverso) — lavoro reale e
+concreto per un prossimo passaggio, non un'invenzione qui.
+
+**Verifica eseguita**: 9 nuovi test (Postgres reale, `MockAIProvider` —
+nessuna chiamata Ollama reale), copertura: persistenza claim reale,
+short-circuit su brand senza evidenza, isolamento del fallimento
+per-brand (il batch non si ferma), `INSUFFICIENT_EVIDENCE` senza
+`ErrorLog`, evidence_ids inventati → `ErrorLog`, `ai.enabled: false` →
+no-op pulito, bookkeeping `AgentRun`/`AgentEvent`, cap `max_brands`,
+esclusione brand `MERGED`. **199 test totali (197 passati, 2 saltati per
+lo stesso motivo di rete della Milestone 9.5)**, `ruff check .`/`mypy
+app/` puliti, `alembic check` senza operazioni pendenti dopo aver
+applicato la migrazione `cc2851ec8377` (tabella `ai_claims` nuova — unica
+modifica di schema di questa milestone).
