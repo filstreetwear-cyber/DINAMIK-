@@ -824,3 +824,54 @@ lo stesso motivo di rete della Milestone 9.5)**, `ruff check .`/`mypy
 app/` puliti, `alembic check` senza operazioni pendenti dopo aver
 applicato la migrazione `cc2851ec8377` (tabella `ai_claims` nuova — unica
 modifica di schema di questa milestone).
+
+## Addendum (16) — 21/09: Milestone 11 — Agent orchestration (scoping onesto, non il nome della milestone)
+
+Nessuna spec da Fil neanche qui ("continua con la prossima milestone").
+Ambito dedotto e volutamente ridimensionato rispetto al nome "Agent
+orchestration": oggi esiste UN solo agente reale (`amazon_scout`,
+`app/agents/registry.py`). L'audit di Milestone 8.5
+(`docs/architecture/development-agents.md`) aveva già deciso di rimandare
+la valutazione di Deep Agents/Agno (i due framework multi-agente reali
+trovati su PyPI) a "quando Milestone 11 viene affrontata" — ma quella
+decisione presuppone un secondo agente (Agent 02 — Amazon Auditor) da
+coordinare, che non esiste. Costruire un router/coordinatore multi-agente,
+o impegnarsi su una dipendenza framework, per un registry con una sola
+voce sarebbe lo stesso errore di "costruire per un futuro immaginato" che
+il docstring di `AgentRegistry` stesso mette in guardia. Questa decisione
+resta quindi ferma, non rivisitata qui.
+
+**Costruito invece**: `app/services/pipeline_orchestrator.py` —
+`run_research_pipeline()`, la prima chiamata reale che incatena le sei
+fasi già esistenti e già testate singolarmente (discovery Milestone 5 →
+brand resolution 6 → dedup 7 → opportunity engine 8 → scoring 9 → AI
+analysis 10) in un unico job, nell'ordine corretto. Prima di questa
+milestone nessun codice le eseguiva in sequenza — ogni test che ne usa più
+di una lo fa a mano, dentro il test stesso. Sicuro per costruzione: ogni
+fase esistente già fallisce in modo controllato al proprio interno
+(try/except che marca il proprio `AgentRun` FAILED senza rilanciare
+l'eccezione, verificato leggendo tutte e cinque le fasi) — l'orchestratore
+non ha bisogno di un try/except per fase, quella garanzia esiste già un
+livello sotto. Aggiunge un `AgentRun` di livello pipeline
+(`agent_name="research_pipeline"`) con un `AgentEvent` per fase che
+registra il proprio `agent_run_id` e stato — visibilità sull'intera
+catena in un posto solo.
+
+**Asimmetria documentata, non nascosta**: `run_amazon_scout_discovery` è
+scoped a UN `ResearchJob`; le fasi successive operano su TUTTI i brand
+`ACTIVE`/risultati pendenti, non solo quelli di quel job — questo modulo
+non inventa un filtro per far coincidere gli ambiti, esegue ogni fase
+esattamente come già esiste.
+
+**Non committa la sessione** — stesso contratto "il chiamante possiede la
+transazione" di ogni fase esistente (verificato con un test dedicato che
+fa rollback e conferma che nulla sopravvive).
+
+**Verifica eseguita**: 4 nuovi test (Postgres reale, provider Amazon/Keepa
+mock, `MockAIProvider` — nessuna chiamata Ollama reale) — run completa
+delle sei fasi, un `AgentEvent` per fase con lo stato corretto, nessun
+commit della sessione, un `AIClaim` reale persistito quando esiste
+evidenza. **203 test totali (201 passati, 2 saltati per lo stesso motivo
+di rete)**, `ruff check .`/`mypy app/` puliti, `alembic check` senza
+operazioni pendenti (nessuna modifica di schema — questa milestone è pura
+orchestrazione, nessuna tabella nuova).
