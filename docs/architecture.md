@@ -1,6 +1,24 @@
 # Dinamik Advisor — Amazon Intelligence Platform
 ## Agent 01 — Amazon Scout — Proposta Architetturale (STEP 1–6, pre-Milestone 1)
 
+> **Nota (Phase K, 21/09)**: questo documento è il **registro cronologico delle
+> decisioni** — la proposta originale (sezioni 0-7 sotto) seguita dagli
+> addenda di ogni fase del refactor, in ordine di scrittura. Per capire
+> **come funziona il sistema oggi**, senza scorrere la cronologia, usa i
+> documenti di riferimento per argomento:
+>
+> - [`docs/tools.md`](tools.md) — Capability/Provider/Registry/Orchestrator
+> - [`docs/providers.md`](providers.md) — stato di ogni provider concreto (Amazon, Keepa, Website, Helium10 sospeso)
+> - [`docs/browser.md`](browser.md) — Browser Automation Engine e il container browser-worker
+> - [`docs/deployment.md`](deployment.md) — Docker/VPS, come fare il deploy
+> - [`docs/database.md`](database.md) — schema e decisioni di design del DB
+>
+> "Stato: in attesa di approvazione" nella riga sotto è lo stato **storico**
+> al momento in cui questo documento è stato scritto, prima della Milestone
+> 1 — l'architettura è stata approvata da allora, come mostra il resto del
+> file. Lasciato invariato perché è un registro, non riscritto per
+> sembrare sempre aggiornato.
+
 Stato: **in attesa di approvazione**. Nessun codice del progetto è stato ancora generato, come richiesto (sezione 72/75 del prompt originale). Questo documento è l'output di STEP 1–6.
 
 ---
@@ -263,3 +281,32 @@ Quattro pezzi, uno per voce del documento di refactor ("docker-compose, browser-
 **Limite onesto, non nascosto**: in questo sandbox `docker` è presente ma **senza demone** (`docker version` risponde per il client, fallisce per il server) — build e run reali delle immagini non sono verificabili qui, stessa classe di limitazione già incontrata in Phase E per il fetch di siti reali. Quello che **è** stato verificato per davvero: `docker compose config` (validazione strutturale reale — risoluzione di `env_file`+`environment`, `depends_on`, volumi, porte; ha confermato che `browser-worker` riceve solo le variabili previste e che `api` risolve `DATABASE_URL`/`REDIS_URL` sugli hostname di rete compose corretti, non `localhost`), `shellcheck` pulito su `scripts/docker-entrypoint-api.sh`, e l'intera logica applicativa nuova (health server, selezione engine reale/mock, override di `BROWSER_EXECUTABLE_PATH`) testata per davvero via `pytest` — incluso un lancio reale di Chromium attraverso il path di codice del browser-worker, non solo attraverso l'engine testato in isolamento in Phase F. Build/deploy reali delle immagini vanno verificati sulla VPS assegnata al progetto.
 
 **Verifica eseguita**: 4 nuovi test (`tests/test_browser_worker.py`) — health in modalità mock, health con un lancio Chromium reale attraverso l'engine e il path del container, un guardrail che il messaggio di `/health` continui a dichiarare onestamente l'assenza di un consumer di task, e che `BROWSER_EXECUTABLE_PATH` venga davvero letto da `build_browser_engine()`. 85/85 test totali verdi (81 + 4), zero regressioni. `ruff`, `mypy app tests` puliti; `alembic check` conferma nessuna operazione di schema pendente (nessuna modifica al DB in questa fase).
+
+## Addendum 2026-09-21 (7) — Phase K: Documentazione
+
+Ultima fase dell'ordinamento esatto che mi hai dato (Phase A→K). Quattro
+nuovi documenti di riferimento per argomento — `docs/tools.md`,
+`docs/browser.md`, `docs/providers.md`, `docs/deployment.md` — più una nota
+in cima a questo file che lo dichiara esplicitamente per quello che è
+diventato: un **registro cronologico delle decisioni** (sezioni 0-7 originali
++ sette addenda), non il punto da cui capire come funziona il sistema oggi.
+Quel ruolo passa ai nuovi documenti, organizzati per argomento invece che
+per fase temporale — architecture.md resta prezioso come cronologia del
+"perché", i nuovi documenti rispondono al "come funziona ora".
+
+Contenuto scritto rileggendo il codice reale (provider.py, orchestrator.py,
+registry.py, bootstrap.py, engine.py, browser_worker.py, docker-compose.yml),
+non copiato dagli addenda precedenti — dove i due divergevano (es. lo stato
+di Jungle Scout/Perpetua: nessuna classe provider esiste affatto, non solo
+"deprioritizzati") ho fatto fede al codice.
+
+Nessuna modifica a codice applicativo in questa fase — solo documentazione
+e il README aggiornato con i link ai nuovi file e la sezione Deployment
+espansa. `ruff`, `mypy app tests`, `pytest` (85/85) e `alembic check`
+restano quelli verificati nell'addendum (6), invariati.
+
+**Fine dell'ordinamento Phase A→K.** Quello che resta aperto: Phase G
+(Helium10, sospesa), il gap noto sul target `make run-worker` (punta a
+`app.workers.celery_app`, che non esiste — Milestone 14), e tutte le
+Milestone 6-17/19 non ancora affrontate (vedi README, sezione Milestone,
+per l'elenco completo con stato).

@@ -1,6 +1,6 @@
 # Dinamik Advisor — Amazon Intelligence Platform
 
-**Stato attuale: Milestone 1+2 completate. Refactor "Helium10 Optional + Provider/Capability" — Phase A (audit), B (database), C (Capability/Provider/Registry/Orchestrator), D (Amazon/Keepa provider), E (Website: HTTP + HTML + JS/Browser fallback), F (Browser Automation Engine, Playwright, verificato reale), H (Orchestrator: cost awareness, confidence, availability) e J (Docker/VPS) completate. Phase G (Helium10) sospesa su tua decisione. Phase I / Milestone 5 (Amazon Scout discovery) completata. Build/run reali delle immagini Docker non verificabili in questo sandbox (nessun demone Docker) — vedi `docs/architecture.md` addendum (6). Vedi `docs/architecture.md` (addendum 21/09) e `docs/refactor-audit-2026-09-21.md`.**
+**Stato attuale: refactor "Helium10 Optional + Provider/Capability" completo, Phase A→K (A audit, B database, C Capability/Provider/Registry/Orchestrator, D Amazon/Keepa, E Website HTTP+HTML+JS/Browser fallback, F Browser Automation Engine reale, H orchestrator cost/confidence/availability, I/Milestone 5 Amazon Scout discovery, J Docker/VPS, K documentazione). Phase G (Helium10) sospesa su tua decisione — unico tratto mancante dell'ordinamento che hai dato. Build/run reali delle immagini Docker non verificabili in questo sandbox (nessun demone Docker) — vedi `docs/deployment.md`. Documentazione per argomento in `docs/`: [`tools.md`](docs/tools.md), [`providers.md`](docs/providers.md), [`browser.md`](docs/browser.md), [`deployment.md`](docs/deployment.md), [`database.md`](docs/database.md); `docs/architecture.md` è il registro cronologico delle decisioni.**
 
 Piattaforma proprietaria di Dinamik Advisor per l'individuazione, analisi e
 qualificazione di brand/seller Amazon con margine di crescita commerciale.
@@ -9,15 +9,18 @@ essere estesa con Agent 02 (Amazon Auditor), Agent 03 (Sales Copilot) e i
 moduli successivi (Listing Optimizer, Ads Analyst, Competitor Monitor,
 Seller Fast Intelligence, Customer Intelligence).
 
-## Architettura
+## Documentazione
 
-Vedi [`docs/architecture.md`](docs/architecture.md) per la proposta
-approvata: stack, schema database, struttura moduli, interfacce dei tool,
-credenziali necessarie e piano delle milestone.
+Organizzata per argomento (Phase K), non per fase temporale — ogni
+documento risponde a "come funziona oggi", `architecture.md` risponde a
+"perché è stato costruito così":
 
-Vedi [`docs/database.md`](docs/database.md) per lo schema applicato, le
-decisioni di design (UUID, vocabolari come stringhe non enum nativi,
-evidence polimorfica) e come rieseguire le migration.
+- [`docs/tools.md`](docs/tools.md) — layer Capability/Provider/Registry/Orchestrator: come routing e fallback decidono chi risponde a una richiesta di dati
+- [`docs/providers.md`](docs/providers.md) — stato di ogni provider concreto (Amazon/Keepa mock, Website reale, Jungle Scout/Perpetua non costruiti, Helium10 sospeso)
+- [`docs/browser.md`](docs/browser.md) — Browser Automation Engine, mock vs reale, il container browser-worker
+- [`docs/deployment.md`](docs/deployment.md) — Docker/VPS: servizi, volumi, come fare il deploy, limiti verificati vs da verificare sulla VPS
+- [`docs/database.md`](docs/database.md) — schema applicato, decisioni di design (UUID, vocabolari come stringhe non enum nativi, evidence polimorfica), come rieseguire le migration
+- [`docs/architecture.md`](docs/architecture.md) — registro cronologico: la proposta architetturale originale approvata + un addendum per ogni fase del refactor
 
 ## Installazione
 
@@ -38,20 +41,28 @@ scoring, retry, rate limit, marketplace supportati) sono in
 `ENVIRONMENT`).
 
 `MOCK_MODE=true` (default) fa funzionare l'intero sistema senza alcuna
-credenziale reale — i connector mock arrivano in Milestone 4.
+credenziale reale — i provider mock (Amazon, Keepa) sono già costruiti
+(Phase D); restano da fare solo Jungle Scout/Perpetua/Helium10 (vedi
+"Stato dei connector" sotto).
 
 ## Stato dei connector
 
-| Connector | Uso | Note |
+Riepilogo rapido — dettaglio completo (fixture usate, capability supportate,
+cosa serve per renderli reali) in [`docs/providers.md`](docs/providers.md).
+
+| Connector | Uso | Stato |
 |---|---|---|
 | Amazon SP-API | non usato dall'Amazon Scout | account-scoped, rilevante da Agent 02 in poi |
-| Keepa | discovery (core, per architettura) | nessuna credenziale confermata — provider mock finché non chiarito |
-| Jungle Scout | discovery (optional) | non disponibile per Dinamik — deprioritizzato |
-| Perpetua (ex-Sellics) | discovery (optional) | non disponibile per Dinamik — deprioritizzato |
-| Website Intelligence | discovery (core) | nessuna credenziale terza parte richiesta — unico provider con dati reali costruibile oggi |
-| **Helium 10** | discovery (optional, non più prioritario) | unico tool commerciale attivo (piano Basic, non Enterprise). **Lavoro specifico Helium10 (modalità manuale e browser automation) sospeso il 21/09** in attesa di chiarimento sui Termini di Servizio — vedi `docs/architecture.md` addendum |
+| `amazon` / `keepa` (provider interni) | discovery | mock (fixture), fallback reciproco reale tramite l'orchestrator |
+| Website Intelligence | discovery | **reale** — nessuna credenziale terza parte richiesta |
+| Jungle Scout / Perpetua | discovery (optional) | non costruiti, deprioritizzati |
+| **Helium 10** | discovery (optional) | unico tool commerciale attivo per Dinamik — **sospeso il 21/09**, ToS da chiarire |
 
-Dalla revisione architetturale del 21/09 (`docs/refactor-audit-2026-09-21.md`), il sistema non dipende più da un singolo connector: l'orchestrator sceglie tra i provider disponibili per ogni "capability" richiesta. Con Helium10 sospeso, però, **nessun provider con dati reali di mercato Amazon è oggi disponibile** — il sistema resta in mock mode per quella parte finché non si sblocca almeno un provider.
+Il sistema non dipende da un singolo connector: l'orchestrator sceglie tra i
+provider disponibili per ogni "capability" richiesta. Con Helium10 sospeso,
+però, **nessun provider con dati reali di mercato Amazon è oggi
+disponibile** — il sistema resta in mock mode per quella parte finché non si
+sblocca almeno un provider.
 
 ## Sviluppo
 
@@ -59,6 +70,11 @@ Dalla revisione architetturale del 21/09 (`docs/refactor-audit-2026-09-21.md`), 
 make test
 make lint
 ```
+
+`make run-worker` **non funziona oggi** — punta a `app.workers.celery_app`,
+un modulo che non esiste ancora (Milestone 14: Workers + scheduler, non
+costruita). Scoperto lavorando su Phase J, lasciato così finché quella
+milestone non viene affrontata invece di essere nascosto.
 
 ## Deployment (Docker/VPS)
 
@@ -89,4 +105,4 @@ Quattro servizi: `postgres`, `redis`, `api` (esegue le migration Alembic all'avv
 - [ ] 16 — Auditor package
 - [ ] 17 — Tests
 - [x] 18 — Docker — sostituita dal refactor Phase J: `docker-compose.yml`, `Dockerfile` (api), `Dockerfile.browser-worker`, volumi, healthcheck; build/run reali da verificare sulla VPS (vedi sezione Deployment sopra)
-- [ ] 19 — Documentation
+- [x] 19 — Documentation — sostituita dal refactor Phase K: `docs/tools.md`, `docs/providers.md`, `docs/browser.md`, `docs/deployment.md`, README riorganizzato; `docs/architecture.md` resta il registro cronologico delle decisioni
