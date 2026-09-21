@@ -14,3 +14,4 @@ htmlcov/
 *.db
 .DS_Store
 data/browser_profiles/
+reports/weekly/

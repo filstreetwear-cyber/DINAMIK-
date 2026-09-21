@@ -54,8 +54,9 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
 
 from app.core.config import Settings, get_settings
-from app.models import Brand, ResearchJob, Score
+from app.models import Brand, ResearchJob, Score, WeeklyScan
 from app.services.pipeline_orchestrator import run_research_pipeline
+from app.services.weekly_scan import run_weekly_scan
 
 
 def _session_factory(settings: Settings):
@@ -66,10 +67,12 @@ app = typer.Typer(name="dinamik", help="Dinamik Advisor — Amazon Intelligence 
 jobs_app = typer.Typer(help="Inspect research jobs.")
 brands_app = typer.Typer(help="Inspect resolved brands.")
 pipeline_app = typer.Typer(help="Run the Milestone 11 research pipeline.")
+scan_app = typer.Typer(help="Run and inspect the weekly intelligence scan.")
 
 app.add_typer(jobs_app, name="jobs")
 app.add_typer(brands_app, name="brands")
 app.add_typer(pipeline_app, name="pipeline")
+app.add_typer(scan_app, name="scan")
 
 
 @app.command()
@@ -247,6 +250,139 @@ async def _brands_list_async(*, limit: int, status: str) -> None:
                 typer.echo(f"{brand.id}  {brand.name:<40}  {score_summary}")
     finally:
         await engine.dispose()
+
+
+@scan_app.command("weekly")
+def scan_weekly(
+    dry_run: bool = typer.Option(False, "--dry-run", help="Preview the scan (universe size only) without touching any persistent state."),
+    force: bool = typer.Option(False, "--force", help="Re-run even if a COMPLETED scan already exists for this period, reusing its scan_id."),
+    max_products: int = typer.Option(20, help="Cap on ASINs discovered per brand during the underlying pipeline run."),
+    max_batch: int = typer.Option(200, help="Cap on brands processed per downstream pipeline stage."),
+) -> None:
+    """Runs (or previews) the weekly intelligence scan for the current
+    period. Idempotent by default: re-running the same day without
+    --force returns the already-COMPLETED scan untouched. --dry-run never
+    creates a WeeklyScan/EntitySnapshot row or writes a report, regardless
+    of whether one already exists for today (see app/services/weekly_scan.py
+    for why that ordering matters -- a real bug, found and fixed 2026-09-21,
+    used to let an existing COMPLETED scan silently swallow --dry-run)."""
+    asyncio.run(
+        _scan_weekly_async(dry_run=dry_run, force=force, max_products=max_products, max_batch=max_batch)
+    )
+
+
+async def _scan_weekly_async(*, dry_run: bool, force: bool, max_products: int, max_batch: int) -> None:
+    settings = get_settings()
+    engine, factory = _session_factory(settings)
+    try:
+        async with factory() as session:
+            summary = await run_weekly_scan(
+                session,
+                settings=settings,
+                force=force,
+                dry_run=dry_run,
+                max_products=max_products,
+                max_batch=max_batch,
+            )
+            if not dry_run:
+                await session.commit()
+    finally:
+        await engine.dispose()
+
+    if summary.dry_run:
+        typer.echo(f"dry_run: period={summary.period_start:%Y-%m-%d}..{summary.period_end:%Y-%m-%d}")
+        typer.echo(f"universe_size (active brands): {summary.universe_size}")
+        typer.echo("no persistent state was touched -- no WeeklyScan/EntitySnapshot row, no report file")
+        return
+
+    if summary.skipped_existing:
+        typer.echo(f"scan_id: {summary.scan_id}  (already {summary.status} for this period -- use --force to re-run)")
+    else:
+        typer.echo(f"scan_id: {summary.scan_id}")
+    typer.echo(f"status: {summary.status}")
+    typer.echo(f"period: {summary.period_start:%Y-%m-%d} .. {summary.period_end:%Y-%m-%d}")
+    typer.echo(f"universe_size: {summary.universe_size}")
+    typer.echo(f"changes_detected: {summary.changes_detected}  (significant: {summary.changes_significant})")
+    typer.echo(
+        f"opportunities: new={summary.opportunities_new} improving={summary.opportunities_improving} "
+        f"deteriorating={summary.opportunities_deteriorating} resolved={summary.opportunities_resolved} "
+        f"continuing={summary.opportunities_continuing}"
+    )
+    if summary.errors:
+        typer.echo(f"errors: {len(summary.errors)} (first: {summary.errors[0]})")
+    if summary.report_path:
+        typer.echo(f"report: {summary.report_path}")
+
+
+@scan_app.command("status")
+def scan_status() -> None:
+    """Shows the most recent WeeklyScan row -- what happened during the
+    last scan, whether it ran today or weeks ago."""
+    asyncio.run(_scan_status_async())
+
+
+async def _scan_status_async() -> None:
+    settings = get_settings()
+    engine, factory = _session_factory(settings)
+    try:
+        async with factory() as session:
+            scan = (
+                await session.execute(select(WeeklyScan).order_by(WeeklyScan.period_end.desc()).limit(1))
+            ).scalar_one_or_none()
+    finally:
+        await engine.dispose()
+
+    if scan is None:
+        typer.echo("no weekly scans have run yet")
+        return
+
+    typer.echo(f"scan_id: {scan.id}")
+    typer.echo(f"period: {scan.period_start:%Y-%m-%d} .. {scan.period_end:%Y-%m-%d}")
+    typer.echo(f"status: {scan.status}")
+    typer.echo(f"started_at: {scan.started_at}")
+    typer.echo(f"completed_at: {scan.completed_at}")
+    typer.echo(f"universe_size: {scan.universe_size}")
+    typer.echo(f"evidence_created: {scan.evidence_created}")
+    typer.echo(f"changes_detected: {scan.changes_detected}  (significant: {scan.changes_significant})")
+    typer.echo(
+        f"opportunities: new={scan.opportunities_new} improving={scan.opportunities_improving} "
+        f"deteriorating={scan.opportunities_deteriorating} resolved={scan.opportunities_resolved} "
+        f"continuing={scan.opportunities_continuing}"
+    )
+    typer.echo(f"errors: {len(scan.errors or [])}")
+    typer.echo(f"report: {scan.report_path}")
+
+
+@scan_app.command("history")
+def scan_history(limit: int = typer.Option(10, help="Max scans to show, most recent period first.")) -> None:
+    """Lists past weekly scans -- the audit trail spec section 41 asks
+    for ('what happened during last Sunday's scan'), without a raw SQL
+    query against weekly_scans."""
+    asyncio.run(_scan_history_async(limit))
+
+
+async def _scan_history_async(limit: int) -> None:
+    settings = get_settings()
+    engine, factory = _session_factory(settings)
+    try:
+        async with factory() as session:
+            rows = (
+                (await session.execute(select(WeeklyScan).order_by(WeeklyScan.period_end.desc()).limit(limit)))
+                .scalars()
+                .all()
+            )
+    finally:
+        await engine.dispose()
+
+    if not rows:
+        typer.echo("no weekly scans found")
+        return
+    for row in rows:
+        typer.echo(
+            f"{row.id}  period_end={row.period_end:%Y-%m-%d}  status={row.status:<10}  "
+            f"changes={row.changes_detected} (sig={row.changes_significant})  "
+            f"new_opps={row.opportunities_new}  errors={len(row.errors or [])}"
+        )
 
 
 if __name__ == "__main__":

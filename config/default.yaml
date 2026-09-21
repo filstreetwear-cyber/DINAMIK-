@@ -99,6 +99,52 @@ scheduler:
   enabled: false
   research_job_cron: "0 8 * * 1"
 
+# Weekly Intelligence Scan feature (built 2026-09-21, on top of
+# Milestones 1-14). A DIFFERENT, additive capability from `scheduler:`
+# above, not a replacement -- `scheduler.research_job_cron` is a generic
+# "run a fresh discovery pipeline periodically" trigger with no defined
+# business purpose (a placeholder from Milestone 14); this section is the
+# real, specified weekly intelligence scan (change detection against
+# prior snapshots, opportunity lifecycle tracking, a persisted report),
+# on its own schedule. `enabled: false` deliberately, even though the
+# feature that requested this section gave `enabled: true` as an EXAMPLE
+# config shape -- that same request's own section 40/45 says not to turn
+# the scheduler on until a manual run has been validated for real, and
+# the only manual runs so far are in this sandbox against mock providers,
+# not Frank's VPS. Flip this once a real `dinamik scan weekly` run has
+# been checked by a human.
+weekly_scan:
+  enabled: false
+  day: sunday
+  time: "06:00"
+  timezone: "Europe/Rome"
+  # Significance thresholds -- not arbitrary in the sense of "picked
+  # without thought", but not calibrated against real outcome data either
+  # (none exists yet, same honest limit scoring_engine.py's own docstring
+  # already states for its level->score mapping). Rationale per threshold:
+  significance:
+    # Amazon's own rating field has 0.1 precision; a swing below ~0.3
+    # points is well within normal week-to-week noise for a low-volume
+    # product and would flag on every run, defeating the point of a
+    # SIGNIFICANCE layer.
+    rating_change_threshold: 0.3
+    # Review counts are cumulative and only grow in the real Amazon UI
+    # (removals are rare/manual) -- a double-digit percentage jump in a
+    # week is a real signal (a promotion, a viral moment), a handful of
+    # new reviews on a low-volume product is not.
+    review_growth_pct_threshold: 10.0
+    # BSR is the noisiest field Amazon exposes (it moves with every sale,
+    # every competitor's sale, and category traffic) -- a much larger bar
+    # than rating/reviews is needed before a rank move means something
+    # rather than daily jitter.
+    rank_change_pct_threshold: 20.0
+    # Score is 0-100 (scoring_engine.py's _LEVEL_TO_SCORE); a full level
+    # step (e.g. MEDIUM 60 -> HIGH 90, or LOW 25 -> MEDIUM 60) is at least
+    # a ~30-35 point jump, so a threshold around half that catches a real
+    # movement within one level, not just noise from a single review
+    # tipping the rating/review rule across its own threshold.
+    opportunity_score_delta_threshold: 15.0
+
 cache:
   default_ttl_seconds: 86400
 

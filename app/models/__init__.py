@@ -19,6 +19,7 @@ from app.models.marketplace import Category, Marketplace
 from app.models.opportunity import Opportunity, Score
 from app.models.research import ResearchJob, ResearchResult
 from app.models.website import WebsiteProfile
+from app.models.weekly_scan import EntitySnapshot, WeeklyScan
 
 __all__ = [
     "AIClaim",
@@ -36,6 +37,7 @@ __all__ = [
     "Company",
     "Competitor",
     "Contact",
+    "EntitySnapshot",
     "ErrorLog",
     "Evidence",
     "Keyword",
@@ -47,4 +49,5 @@ __all__ = [
     "Score",
     "ToolCall",
     "WebsiteProfile",
+    "WeeklyScan",
 ]

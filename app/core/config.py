@@ -133,6 +133,14 @@ class Settings(BaseSettings):
     # own equivalent symlink (see Dockerfile.browser-worker).
     browser_executable_path: str | None = Field(default=None, alias="BROWSER_EXECUTABLE_PATH")
 
+    # Weekly Intelligence Scan feature (2026-09-21): where persisted
+    # markdown reports (app/services/weekly_scan.py) land. Same
+    # env-overridable, repo-relative-by-default shape as
+    # browser_profiles_dir above, for the same reason -- tests isolate it
+    # to a tmp dir (see tests/conftest.py) instead of writing real report
+    # files into the working tree on every run.
+    weekly_reports_dir: str = Field(default="reports/weekly", alias="WEEKLY_REPORTS_DIR")
+
     # populated from YAML after construction, not an env var
     yaml_config: dict[str, Any] = Field(default_factory=dict, exclude=True)
 
@@ -226,6 +234,15 @@ class Settings(BaseSettings):
         wired to anything by this milestone either, honestly, same as
         before it."""
         return dict(self.yaml_config.get("scheduler", {}))
+
+    def weekly_scan_config(self) -> dict[str, Any]:
+        """config/default.yaml's `weekly_scan:` section -- the Weekly
+        Intelligence Scan feature's own schedule/significance config, a
+        different, additive thing from `scheduler_config()` above (see
+        that section's own comment in the YAML for the distinction).
+        Same "missing section is a safe default, not a wiring bug"
+        precedent as `ai_config()`/`scheduler_config()`."""
+        return dict(self.yaml_config.get("weekly_scan", {}))
 
 
 @lru_cache

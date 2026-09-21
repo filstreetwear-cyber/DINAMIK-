@@ -1091,3 +1091,101 @@ di rete)**, `ruff check .`/`mypy app tests` puliti, `alembic check`
 senza operazioni pendenti (nessuna modifica di schema). Suite rieseguita
 due volte di seguito dopo la pulizia del test dal vivo, entrambe
 222/222 stabili, DB confermato vuoto via query diretta.
+
+## Addendum (20) — 21/09: Weekly Intelligence Scan (feature, risposta al gap di Milestone 14)
+
+Non una milestone numerata della sequenza originale — la risposta
+diretta a un gap che io stesso avevo dichiarato chiudendo Milestone 14:
+`scheduler.enabled` restava `false` perché nessuno aveva mai specificato
+COSA una scansione ricorrente dovesse cercare. Fil ha risposto con una
+spec completa di 46 sezioni ("DINAMIK — WEEKLY INTELLIGENCE SCAN"); il
+dettaglio completo di audit, architettura, scope onestamente ridotto e
+rationale delle soglie vive in `docs/architecture/weekly-scan.md` — qui
+solo il riepilogo di cosa è stato costruito, il bug reale trovato, e la
+verifica.
+
+**Audit prima di scrivere codice** (dettagli completi nel documento
+dedicato): `AgentRegistry` è introspection-only, non un dispatcher — il
+lavoro reale passa ancora da `run_research_pipeline`; `AmazonProduct.
+price`/`.currency` non sono mai popolati da questa pipeline (esclude
+`PRICE_CHANGE`); `_get_or_create_product` aggiorna `rating`/
+`review_count`/`bsr` in place ad ogni osservazione (motivo reale per cui
+serve una tabella di snapshot separata); il provider Amazon mock è
+statico (stesso output ad ogni chiamata — il change detection va testato
+con dati sintetici, non due run reali); solo 2 dei 6 `OpportunityType`
+hanno un detector reale; `ResearchJobStatus` copre già tutti gli stati
+che servono a `WeeklyScan.status`.
+
+**Costruito**: `app/models/weekly_scan.py` (`WeeklyScan` — vincolo
+unique su `period_end` per l'idempotenza; `EntitySnapshot` — riusa il
+pattern polimorfico non-FK già usato da `Evidence`, doppia funzione di
+snapshot + cronologia cambiamenti via colonna JSONB `changes`), migrazione
+`99ceb1d2af8f` (autogenerata, rivista, applicata, `alembic check` pulito);
+`app/services/weekly_scan.py` — `ChangeThresholds`/`compute_changes()`/
+`classify_opportunity_lifecycle()` (funzioni pure, testabili senza DB),
+`run_weekly_scan()` (l'orchestratore: idempotenza → universo (Brand
+ACTIVE esistenti, nessuna nuova tabella universo) → `run_research_
+pipeline()` INTATTO → snapshot/change detection per prodotto →
+classificazione lifecycle per opportunità → report markdown); sezione
+`weekly_scan:` in `config/default.yaml` (`enabled: false`, day/time/
+timezone, quattro soglie di significatività ciascuna con motivazione
+documentata inline — non inventate a caso); `Settings.weekly_scan_
+config()` + `weekly_reports_dir`, stesso precedente di `scheduler_
+config()`/`ai_config()` (la sezione YAML è autorevole); tre comandi CLI
+(`scan weekly [--dry-run] [--force]`, `scan status`, `scan history`),
+stesso `typer.Typer` sub-app esistente; `run_weekly_scan_task` in
+`app/workers/tasks.py` + una seconda entry `beat_schedule` indipendente
+in `app/workers/celery_app.py` (`_weekly_scan_crontab()` converte
+`weekly_scan.timezone: "Europe/Rome"` in un crontab UTC via `zoneinfo`
+stdlib, con un limite di deriva DST documentato onestamente nel modulo
+stesso, non nascosto).
+
+**Bug reale trovato con testing dal vivo, non da un test scritto a
+priori**: il branch `dry_run` era scritto DOPO il controllo di
+idempotenza — un `dry_run=True` chiamato lo stesso giorno di uno scan
+già `COMPLETED` restituiva silenziosamente il riepilogo stantio di
+quello scan invece di un preview a stato zero, violando direttamente il
+contratto della sezione 28 della spec ("NOT modify persistent state").
+Trovato lanciando a mano la sequenza reale (run normale → skip → force →
+dry-run) contro Postgres reale in mock mode, esattamente la disciplina
+di verifica di ogni milestone precedente. Corretto spostando il branch
+`dry_run` prima del lookup di idempotenza; coperto da un test di
+regressione dedicato. Due variabili locali (`active_brands`/
+`universe_size`) sono rimaste morte dopo lo spostamento del blocco —
+rimosse, non lasciate come codice inutilizzato.
+
+**Deliberatamente non costruito in questa passata** (onestà sullo
+scope, non un elenco di scuse — dettagli e motivazioni nel documento
+dedicato): 9 dei 12 tipi di cambiamento nominati dalla spec (nessun dato
+reale dietro); 2 dei 7 stati di lifecycle (`DISAPPEARED`/`RECURRING`,
+non distinguibili da una storia di sole due righe `Score`); un budget AI
+dedicato per-scan con priorità change-driven (`weekly_scan.max_ai_
+calls`) — questa build riusa l'AI già invocata da `run_research_
+pipeline`, non aggiunge una seconda passata AI specifica sui cambiamenti
+rilevati.
+
+**Verificato con infrastruttura reale**: un vero `redis-server` locale,
+un vero processo `celery -A app.workers.celery_app worker`, dispatch
+reale di `run_weekly_scan_task` via `.delay()` attraverso Redis,
+risultato reale dal result backend — stessa disciplina di Milestone 14,
+non solo `.apply()` in processo. Righe committate da ogni run dal vivo
+(smoke test manuale + dispatch Celery) ripulite subito con DELETE
+mirate per ID, mai un TRUNCATE globale.
+
+**Verifica eseguita**: `tests/test_weekly_scan.py`, 32 test nuovi —
+unitari puri (nessun DB) per `compute_changes()`/
+`classify_opportunity_lifecycle()`/`ChangeThresholds.from_config()`/
+`_period_bounds()`; integrazione contro Postgres reale (mock mode,
+pattern a rollback come `test_pipeline_orchestrator.py` — nessuna
+DELETE manuale necessaria per questi) per idempotenza, force, il bug di
+dry-run (regressione dedicata), change detection contro uno snapshot
+sintetico scritto a mano, isolamento errori (pipeline mockata per
+fallire → stato `PARTIAL`); test CLI reali via `CliRunner`; un test
+Celery via `.apply()` più i test della conversione timezone e del
+wiring dello scheduler. **252 test totali (250 passati, 2 saltati per lo
+stesso motivo di rete)**, `ruff check .`/`mypy app tests` puliti (102
+file sorgente), `alembic check` senza operazioni pendenti dopo
+l'applicazione della migrazione. Suite rieseguita due volte di seguito,
+entrambe 252/252 stabili; DB confermato a zero righe (`WeeklyScan`/
+`EntitySnapshot`/`ResearchJob`/`Brand`) via query diretta dopo la
+pulizia di ogni sessione di test dal vivo.

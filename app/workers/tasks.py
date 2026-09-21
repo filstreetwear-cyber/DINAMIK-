@@ -48,6 +48,7 @@ from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
 from app.core.config import Settings, get_settings
 from app.models import ResearchJob
 from app.services.pipeline_orchestrator import run_research_pipeline
+from app.services.weekly_scan import run_weekly_scan
 from app.workers.celery_app import celery_app
 
 
@@ -128,3 +129,54 @@ def run_scheduled_research_job() -> dict[str, Any]:
     marketplace = settings.yaml_config.get("default_marketplace", "IT")
     name = f"Scheduled research — {datetime.now(UTC):%Y-%m-%d %H:%M UTC}"
     return run_research_pipeline_task(name=name, marketplace=marketplace, category=None, subcategory=None)
+
+
+@celery_app.task(name="app.workers.tasks.run_weekly_scan_task")
+def run_weekly_scan_task(*, force: bool = False) -> dict[str, Any]:
+    """Celery Beat's weekly-intelligence-scan entry point, scheduled from
+    `config/default.yaml`'s `weekly_scan.day`/`time`/`timezone` (converted
+    to a UTC crontab -- see app/workers/celery_app.py's docstring) when
+    `weekly_scan.enabled: true`. Runs `run_weekly_scan` (feature,
+    2026-09-21) directly against its own short-lived engine -- same
+    per-invocation pattern as every other task in this module, for the
+    same "Event loop is closed" reason documented above -- and commits,
+    since Beat firing this is the one caller responsible for persisting
+    the result (`run_weekly_scan` itself, like every service in this
+    project, defers committing to its caller).
+
+    `force` exists for manual re-dispatch
+    (`run_weekly_scan_task.delay(force=True)` from a shell, or a future
+    admin action) -- Beat's own periodic fire never passes it, since a
+    normal weekly tick should skip an already-COMPLETED scan for the
+    same period (idempotency, spec section 4) rather than redo it.
+    Returns a plain dict (Celery's JSON result serializer can't carry
+    the dataclass WeeklyScanSummary directly)."""
+    return asyncio.run(_run_weekly_scan_task_async(force=force))
+
+
+async def _run_weekly_scan_task_async(*, force: bool) -> dict[str, Any]:
+    settings = get_settings()
+    engine, factory = _session_factory(settings)
+    try:
+        async with factory() as session:
+            summary = await run_weekly_scan(session, settings=settings, force=force)
+            await session.commit()
+
+            return {
+                "scan_id": str(summary.scan_id),
+                "status": summary.status,
+                "period_start": summary.period_start.isoformat(),
+                "period_end": summary.period_end.isoformat(),
+                "universe_size": summary.universe_size,
+                "changes_detected": summary.changes_detected,
+                "changes_significant": summary.changes_significant,
+                "opportunities_new": summary.opportunities_new,
+                "opportunities_improving": summary.opportunities_improving,
+                "opportunities_deteriorating": summary.opportunities_deteriorating,
+                "opportunities_resolved": summary.opportunities_resolved,
+                "opportunities_continuing": summary.opportunities_continuing,
+                "skipped_existing": summary.skipped_existing,
+                "report_path": summary.report_path,
+            }
+    finally:
+        await engine.dispose()
