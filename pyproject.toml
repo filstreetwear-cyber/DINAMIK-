@@ -59,3 +59,12 @@ target-version = "py312"
 # hand-maintained (see its DATABASE_URL/model-import edits) and stays
 # linted normally.
 extend-exclude = ["migrations/versions"]
+
+[tool.ruff.lint.flake8-bugbear]
+# Milestone 13: FastAPI's own dependency-injection pattern is exactly the
+# `Depends(get_session)`-as-default-argument shape B008 exists to catch in
+# the general case -- here it's correct by design (FastAPI calls it once
+# per request, not once at definition time, unlike a real mutable-default
+# bug). ruff's documented fix is this allowlist, not a per-line noqa on
+# every endpoint (https://docs.astral.sh/ruff/rules/function-call-in-default-argument/).
+extend-immutable-calls = ["fastapi.Depends", "app.database.session.get_session"]

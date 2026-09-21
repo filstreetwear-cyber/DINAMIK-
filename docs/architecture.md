@@ -932,3 +932,87 @@ in mock mode, con pulizia esplicita dei dati di test. **209 test totali
 (207 passati, 2 saltati per lo stesso motivo di rete)**, `ruff check
 .`/`mypy app/` puliti, `alembic check` senza operazioni pendenti (nessuna
 modifica di schema).
+
+## Addendum (18) — 21/09: Milestone 13 — API
+
+Scope ancorato allo stesso posto che questa sessione controlla da
+sempre prima di scrivere codice: il docstring di `app/main.py` nomina
+"research jobs, prospects, brands, agent runs" come ambito di Milestone
+13 fin da Milestone 1, e Milestone 12 ha già stabilito cosa significhi
+concretamente per questo progetto — quattro capacità (`health`,
+`pipeline run`, `jobs list`, `brands list`), l'unico modo reale oggi di
+eseguire o ispezionare qualcosa da fuori un test. Questa milestone espone
+le stesse quattro capacità via HTTP (`GET /health`, `POST /jobs`, `GET
+/jobs`, `GET /brands`) più un quinto endpoint genuinamente nuovo, `GET
+/jobs/{job_id}` — necessario perché un chiamante HTTP (a differenza di un
+utente da terminale) ha bisogno di recuperare il singolo job appena
+creato dal suo id, senza listare e filtrare lato client. Nessun endpoint
+per "prospects" o "agent runs": verificato con grep che nessun servizio
+scrive mai una riga `ProspectStatus`, e "agent runs" oltre a quanto il
+summary della pipeline già riporta sarebbe superficie inventata, non
+richiesta da nessun precedente reale.
+
+**Costruito**: `app/schemas/api.py` (schemi Pydantic request/response,
+appiattiti sugli stessi campi scalari che `app/cli.py` già stampa con
+`typer.echo` — non una reinvenzione), `app/main.py` riscritto con i cinque
+endpoint sopra. `GET /health` sostituisce la versione precedente
+(solo config statica, sempre "healthy" senza controllare nulla) con la
+stessa tripla verifica di `dinamik health` — config, connettività DB
+reale, stato reale del gateway AI. `POST /jobs` crea un `ResearchJob` ed
+esegue `run_research_pipeline` di Milestone 11 fino al completamento
+prima di rispondere — stesso contratto sincrono di `dinamik pipeline
+run`, nessuna coda/worker in background (Milestone 14 non esiste ancora,
+`make run-worker` non funziona). Riusa `app/database/session.py`'s
+`get_session()` così com'è, a differenza della CLI: FastAPI sotto uvicorn
+ha davvero un solo event loop di lunga durata per tutto il processo, la
+condizione per cui quel modulo è stato progettato — non c'è bisogno di
+reintrodurre l'engine-per-invocazione della CLI.
+
+**Bug reale trovato scrivendo i test — una terza istanza della stessa
+classe di bug di Milestone 12, non lo stesso bug**: i primi test con un
+semplice `TestClient(app)` fallivano al secondo/terzo request nella
+stessa funzione con `RuntimeError: ... attached to a different loop`.
+Causa, confermata leggendo il sorgente di `starlette.testclient`: un
+`TestClient(app)` usato senza `with` apre un NUOVO
+`anyio.from_thread.start_blocking_portal()` — nuovo thread, nuovo event
+loop — per OGNI singola richiesta, riusando `self.portal` solo quando il
+client è aperto come context manager. L'`engine` di
+`app/database/session.py`, creato una volta all'import, lega le proprie
+connessioni asyncpg al loop della prima richiesta e si rompe alla
+seconda. La premessa "FastAPI ha un solo event loop" nel docstring di
+quel modulo è vera per uvicorn in produzione — non lo è per un
+`TestClient(app)` non usato come context manager, e non era mai stata
+verificata per davvero fino a qui. Corretto sostituendo il `client`
+globale con una fixture `scope="module"` che apre `TestClient(app)` con
+`with` una sola volta per file — la vera replica del comportamento di
+produzione (un loop persistente), non un workaround.
+
+**Verificato anche con un vero processo uvicorn**, non solo via
+`TestClient`: avviato `uvicorn app.main:app` a mano, richieste `curl`
+reali contro tutti e cinque gli endpoint (incluso un `POST /jobs` che ha
+davvero eseguito discovery→resolution→dedup→opportunity→scoring→AI in
+mock mode) — stesso output della CLI (`ai_disabled=false,
+claims_created=0`, coerente con Ollama irraggiungibile in questo
+sandbox). Ha committato righe reali nel DB condiviso con la test suite,
+stesso rischio già documentato in Addendum (17); ripulito subito con
+DELETE mirate per tabella (non un TRUNCATE globale) e la suite
+rieseguita due volte di seguito, confermando via query diretta che DB
+torna a zero righe.
+
+Ruff ha segnalato `B008` (function-call-in-default-argument) su ogni
+`Depends(get_session)` — il pattern idiomatico di FastAPI, non un bug
+reale (FastAPI chiama `Depends(...)` una volta per richiesta, non una
+volta alla definizione). Corretto con la soluzione documentata da ruff
+stesso: `[tool.ruff.lint.flake8-bugbear] extend-immutable-calls =
+["fastapi.Depends", "app.database.session.get_session"]` in
+`pyproject.toml`, non un `noqa` per riga.
+
+**Verifica eseguita**: `tests/test_main.py` riscritto da 1 a 9 test reali
+(Postgres reale, `TestClient` reale contro `app.main.app`, nessun mock
+del layer HTTP) — 8 netti in più rispetto a Milestone 12 — più uno smoke
+test manuale end-to-end con uvicorn reale. **217 test totali (215
+passati, 2 saltati per lo stesso motivo di rete)**, `ruff check
+.`/`mypy app tests` puliti, `alembic check` senza operazioni pendenti
+(nessuna modifica di schema — questa milestone è pura superficie API sui
+servizi esistenti). Suite rieseguita due volte di seguito, entrambe
+217/217 stabili, DB confermato vuoto via query diretta dopo ciascuna.
