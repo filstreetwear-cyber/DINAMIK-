@@ -85,15 +85,23 @@ di Playwright diverso).
 ## Il container `browser-worker`
 
 `app/workers/browser_worker.py` è il processo che gira nel container
-dedicato. **Non è ancora un consumer di task** — non esiste una coda di
-righe `BrowserTask` da cui pescare (serve Milestone 14: Workers +
-scheduler, non costruita). Quello che fa: al boot esegue un vero smoke
-test dell'engine (`fetch_rendered_html` su `about:blank`, zero rete
-richiesta) attraverso lo stesso `build_browser_engine()` usato da ogni
-provider, e lo serve su `GET /health` — provando che il toolchain browser
-del container e il volume `BROWSER_PROFILES_DIR` funzionano davvero, non
-solo che il processo è in esecuzione. Milestone 14 è dove questo file
-diventa un vero consumer.
+dedicato. **Non è ancora un consumer di task**, e resta così anche dopo
+Milestone 14 (Workers + scheduler, costruita: `app/workers/celery_app.py`
+e `app/workers/tasks.py` esistono ora) — verificato con grep prima di
+scrivere quella milestone che nessun servizio crea mai una riga
+`BrowserTask`, quindi costruire un consumer per una coda che nessuno
+popola sarebbe esattamente la scorciatoia "sembra finito, non lo è" che
+questo progetto continua a non prendere. Milestone 14 ha dato un worker
+Celery reale al lavoro che esiste davvero (la pipeline di ricerca,
+`app/workers/tasks.py`), non a `BrowserTask`. Quello che questo file fa
+oggi: al boot esegue un vero smoke test dell'engine (`fetch_rendered_html`
+su `about:blank`, zero rete richiesta) attraverso lo stesso
+`build_browser_engine()` usato da ogni provider, e lo serve su `GET
+/health` — provando che il toolchain browser del container e il volume
+`BROWSER_PROFILES_DIR` funzionano davvero, non solo che il processo è in
+esecuzione. Diventerà un vero consumer solo quando qualcosa in questo
+codebase inizierà davvero a creare righe `BrowserTask` (es. un futuro
+provider Helium10 basato su browser, Phase G, oggi sospesa).
 
 ## Testare
 

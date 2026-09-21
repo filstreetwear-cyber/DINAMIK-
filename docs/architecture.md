@@ -1016,3 +1016,78 @@ passati, 2 saltati per lo stesso motivo di rete)**, `ruff check
 (nessuna modifica di schema — questa milestone è pura superficie API sui
 servizi esistenti). Suite rieseguita due volte di seguito, entrambe
 217/217 stabili, DB confermato vuoto via query diretta dopo ciascuna.
+
+## Addendum (19) — 21/09: Milestone 14 — Workers + scheduler
+
+Scope ancorato a tre breadcrumb reali, non indovinato: `pyproject.toml`
+dichiara `celery>=5.4`/`redis>=5.0` dal Milestone 1, `Makefile`'s
+`run-worker` punta a `celery -A app.workers.celery_app worker` da sempre
+(modulo mai esistito fino ad ora), e `config/default.yaml` ha una
+sezione `scheduler:` (`enabled: false`, `research_job_cron: "0 8 * * 1"`)
+dichiarata durante il refactor ma mai letta da nessun codice — confermato
+con grep prima di scrivere questa milestone. `docker-compose.yml` aveva
+già scritto da sé, nel proprio commento, cosa sarebbe toccato a questa
+milestone: "Deliberately NOT here: a worker/celery service... That
+service is Milestone 14's to add, once there's a real task to run."
+
+**Costruito**: `app/workers/celery_app.py` (Celery app, broker/backend
+Redis da `settings.redis_url`, serializzazione JSON non pickle),
+`app/workers/tasks.py` con due task — `run_research_pipeline_task`
+(equivalente in coda di `dinamik pipeline run`/`POST /jobs`: crea un
+`ResearchJob`, esegue `run_research_pipeline`, committa, stesso pattern
+"engine per invocazione" della CLI per lo stesso motivo) e
+`run_scheduled_research_job` (il task periodico che Celery Beat chiama,
+usa `default_marketplace` già dichiarato in YAML — non inventato — e
+NESSUNA categoria, perché nessuna categoria di ricerca ricorrente è mai
+stata specificata da nessuna parte in questo codebase: gap onesto,
+documentato nel modulo, non riempito a caso). `Settings.scheduler_config()`
+aggiunto a `app/core/config.py`, che rispecchia lo stesso precedente già
+stabilito per `ai_config()`: la sezione YAML (`scheduler.enabled`) è
+autorevole, non l'env flag `ENABLE_SCHEDULER` — verificato con grep che
+quel flag non era mai letto da nessuna parte, esattamente come
+`ENABLE_AI_ANALYSIS` prima che Milestone 9.5 lo scoprisse.
+
+**`docker-compose.yml` aggiornato**: due nuovi servizi, `worker` e
+`beat` (celery beat separato dal worker, non `worker -B` — un embedded
+scheduler duplicherebbe i task periodici se `worker` venisse mai scalato
+a più repliche), entrambi riusano l'immagine `api` via `build:` invece di
+un Dockerfile dedicato (nessun bisogno di un browser reale, solo
+Python+DB+Redis), nessuno dei due esegue le migration all'avvio
+(`entrypoint: []`, non lo script di `api` — un servizio solo,
+`depends_on: api: condition: service_healthy`, resta responsabile dello
+schema). Validato con `docker compose config` (nessun demone Docker in
+questo sandbox, stesso limite onesto di Phase J).
+
+**`app/workers/browser_worker.py` resta invariato deliberatamente**: non
+esiste ancora nessuna riga `BrowserTask` scritta da nessuna parte del
+codebase (confermato con grep), quindi costruire un consumer di quella
+coda ora sarebbe la stessa scorciatoia "sembra finito, non lo è" che
+questo progetto continua a rifiutare — Milestone 14 ha dato un worker
+reale al lavoro che esiste davvero (la pipeline), non a un lavoro
+ipotetico.
+
+**Verificato anche con infrastruttura reale, non solo `.apply()` in
+processo**: avviato un vero `redis-server` locale, un vero processo
+`celery -A app.workers.celery_app worker` (lo stesso comando esatto di
+`make run-worker`), dispatch reale di un task via `.delay()` attraverso
+Redis, risultato reale recuperato dal result backend (`products_found:
+2`, coerente con ogni altro run mock-mode di questa sessione). Anche
+`celery -A app.workers.celery_app beat` avviato per davvero e confermato
+senza errori di configurazione. Righe committate dal test dal vivo
+ripulite subito con DELETE mirate (stesso pattern di ogni milestone
+precedente), non un TRUNCATE globale.
+
+**Verifica eseguita**: `tests/test_workers.py`, 5 nuovi test (Postgres
+reale, task Celery eseguiti per davvero via `.apply()` — non un mock del
+layer worker). Un bug reale trovato scrivendo uno di questi test, non nel
+codice di produzione: un test che chiamava `get_settings()` fresco dopo
+che l'autouse fixture di `tests/conftest.py` aveva già invalidato la
+cache otteneva un oggetto `Settings` diverso da quello che
+`app/workers/celery_app.py` legge davvero (catturato una volta
+all'import, stesso pattern di `app/main.py`) — il test non provava
+nulla finché non è stato corretto per patchare l'oggetto `settings`
+giusto. **222 test totali (220 passati, 2 saltati per lo stesso motivo
+di rete)**, `ruff check .`/`mypy app tests` puliti, `alembic check`
+senza operazioni pendenti (nessuna modifica di schema). Suite rieseguita
+due volte di seguito dopo la pulizia del test dal vivo, entrambe
+222/222 stabili, DB confermato vuoto via query diretta.

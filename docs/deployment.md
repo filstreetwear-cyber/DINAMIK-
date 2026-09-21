@@ -25,11 +25,21 @@ di questa fase, non come una formalità.
 | `postgres` | `postgres:16-alpine` | interna | `pg_isready` | `postgres_data` |
 | `redis` | `redis:7-alpine` | interna | `redis-cli ping` | `redis_data` |
 | `api` | `Dockerfile` | `8000` | `GET /health` | — |
+| `worker` | `Dockerfile` (riusata) | interna | — (nessun endpoint HTTP: healthcheck via `celery inspect ping` non aggiunto in questa fase) | — |
+| `beat` | `Dockerfile` (riusata) | interna | — | — |
 | `browser-worker` | `Dockerfile.browser-worker` | `8100` | `GET /health` | `browser_profiles` |
 
-Nessun servizio `worker`/celery — `app/workers/celery_app.py` non esiste
-ancora (Milestone 14). Aggiungerlo ora, contro un modulo che non esiste,
-avrebbe fatto sembrare finita una fase che non lo è.
+`worker`/`beat` (Milestone 14) riusano l'immagine `api` via `build:` — un
+worker Celery per `app/workers/tasks.py` non ha bisogno di un browser
+reale, solo di Python + accesso a DB/Redis, quindi una seconda immagine
+duplicherebbe la prima senza motivo (diverso da `browser-worker`, che ha
+davvero bisogno del proprio Chromium). Nessuno dei due esegue le
+migration all'avvio (`entrypoint: []`, non lo script di `api`) — `api` è
+l'unico servizio che le applica, `depends_on: api: condition:
+service_healthy` garantisce che lo schema esista già. `beat` è un
+servizio separato da `worker` (non `worker -B`): un embedded scheduler
+duplicherebbe ogni task periodico se `worker` venisse mai scalato a più
+repliche.
 
 ## Come fare il deploy
 
@@ -83,7 +93,7 @@ perché sono nello stesso file `.env`.
 ## Volumi — cosa persiste e perché
 
 - `postgres_data` — dati applicativi, ovvio.
-- `redis_data` — persistenza opzionale della coda (rilevante da Milestone 14).
+- `redis_data` — persistenza della coda: broker/result backend reali per `worker`/`beat` da Milestone 14.
 - `browser_profiles` — profili browser persistenti (cookie/stato di login).
   **Questo è il volume che conta per Helium10, quando Phase G riparte**: un
   login umano fatto una volta sopravvive a un redeploy del container,

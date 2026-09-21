@@ -50,6 +50,17 @@ include = ["app*"]
 asyncio_mode = "auto"
 testpaths = ["tests"]
 
+[tool.mypy]
+# Milestone 14: celery ships no py.typed marker and there is no
+# maintained `types-celery` stub package on PyPI (checked: `pip index
+# versions types-celery` finds nothing) -- unlike yaml, where
+# types-PyYAML exists and is already a dev dependency. This is the
+# documented mypy escape hatch for exactly that situation, scoped to
+# celery only, not a blanket ignore_missing_imports.
+[[tool.mypy.overrides]]
+module = ["celery.*"]
+ignore_missing_imports = true
+
 [tool.ruff]
 line-length = 100
 target-version = "py312"

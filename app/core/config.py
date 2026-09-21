@@ -207,6 +207,26 @@ class Settings(BaseSettings):
         caller must be told about explicitly."""
         return dict(self.yaml_config.get("ai", {}))
 
+    def scheduler_config(self) -> dict[str, Any]:
+        """config/default.yaml's `scheduler:` section (`enabled: false`,
+        `research_job_cron: "0 8 * * 1"`) — declared since this project's
+        original refactor pass but never read by any Python code until
+        Milestone 14 (confirmed by grep before this method existed). The
+        `enable_scheduler` env flag above turns out to be the exact same
+        situation `enable_ai_analysis` already was before Milestone 9.5:
+        a feature flag declared in `.env`/Settings that nothing consumes,
+        because the section it would gate is controlled by its own
+        `enabled` key in YAML instead. This method follows that same,
+        already-established precedent (YAML `ai.enabled` is authoritative
+        for the AI layer, not `ENABLE_AI_ANALYSIS`) rather than picking a
+        new convention: `scheduler.enabled` in YAML is what
+        `app/workers/celery_app.py` actually checks. `enable_scheduler`
+        stays defined (removing a Settings field that some future .env
+        might still reference is a separate, unrelated cleanup) but is not
+        wired to anything by this milestone either, honestly, same as
+        before it."""
+        return dict(self.yaml_config.get("scheduler", {}))
+
 
 @lru_cache
 def get_settings() -> Settings:
