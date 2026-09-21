@@ -71,10 +71,29 @@ rate_limits:
   ai:
     requests_per_minute: 50
 
+# Milestone 9.5: local-first AI layer. Restructured from the previous
+# unused default_model/max_tokens/temperature shape (nothing read those
+# keys -- confirmed by grep before this change) -- see
+# docs/architecture/local-ai.md for the full rationale. `local` is the only
+# implemented provider this milestone (section 4/24: zero mandatory API
+# cost, no paid fallback); `cloud.enabled: false` is enforced at wiring
+# time (app/ai/router.py raises AICloudNotImplementedError), not just
+# documented here.
 ai:
-  default_model: claude-sonnet-4-5
-  max_tokens: 4096
-  temperature: 0.2
+  enabled: true
+  provider: local
+  local:
+    backend: ollama
+    base_url: http://localhost:11434
+    model: qwen3:1.7b
+    timeout_seconds: 60
+    max_concurrency: 1
+    temperature: 0.2
+    num_ctx: 2048
+    num_predict: 512
+    keep_alive: 5m
+  cloud:
+    enabled: false
 
 scheduler:
   enabled: false

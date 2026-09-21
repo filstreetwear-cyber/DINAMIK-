@@ -192,6 +192,21 @@ class Settings(BaseSettings):
             raise KeyError(f"no provider config for '{name}' in config/default.yaml providers: section")
         return configs[name]
 
+    def ai_config(self) -> dict[str, Any]:
+        """config/default.yaml's `ai:` section (Milestone 9.5) —
+        restructured 2026-09-21 from the unused `default_model/max_tokens/
+        temperature` shape (never read by any code, confirmed by grep) into
+        `enabled/provider/local/cloud`. Returns {} if absent rather than
+        raising: app/ai/router.py's own defaults (provider=local,
+        backend=ollama, base_url=http://localhost:11434, model=qwen3:1.7b)
+        are what a bare `ai: {}` — or a missing section entirely — should
+        resolve to, mirroring opportunity_rule_config()'s "missing config
+        is a safe default, not a wiring bug" precedent rather than
+        provider_config()'s "missing entry is an error" one, since there is
+        exactly one valid local provider shape today, not an open set the
+        caller must be told about explicitly."""
+        return dict(self.yaml_config.get("ai", {}))
+
 
 @lru_cache
 def get_settings() -> Settings:

@@ -687,3 +687,78 @@ append-only, cap `max_brands`, eccezione non gestita catturata. **167/167
 test totali verdi**, `ruff check .`/`mypy app/` puliti, `alembic check`
 senza operazioni pendenti (nessuna modifica di schema — `Score` esiste già
 dalla Milestone 2).
+
+## Addendum (14) — 21/09: Milestone 9.5 — Local AI Infrastructure (Ollama + Qwen3 1.7B + AI Gateway)
+
+Richiesta esplicita di Fil dopo Milestone 9: "non voglio spendere un
+patrimonio in API" — costruire l'infrastruttura AI locale, a costo zero
+obbligatorio, PRIMA di qualunque chiamata AI a pagamento (Milestone 10).
+
+**Architettura reale, costruita e testata**: `AIProvider` (ABC,
+`app/ai/provider.py`, famiglia di eccezioni deliberatamente separata da
+`IntelligenceProvider`/`ProviderError` per non confondere agenti DATA e
+agenti AI — sezione 23 della spec) → `OllamaProvider` (implementazione
+concreta via `httpx`, `app/ai/ollama_provider.py`) → `AIGateway` (unico
+punto che un agente deve chiamare, `app/ai/gateway.py`) → `AIRouter`
+(risolve `local`/`cloud` da config, solo `local` implementato,
+`app/ai/router.py`) → `build_default_ai_gateway()` (mirror di
+`build_default_registry()`, `app/ai/bootstrap.py`). `AIClaimDraft`/
+`AIClaim` (`app/ai/contracts.py`) separano ciò che il modello produce da
+ciò che il sistema attesta — `id`/`created_at`/`model`/`provider` non sono
+mai auto-dichiarati dal modello. `AIAnalyst` (`app/ai/analyst.py`) è
+l'unico agente AI: consuma `Evidence` strutturata, produce `AIClaim`
+strutturate, non produce raccomandazioni commerciali finali, non promuove
+mai silenziosamente INFERENCE/HYPOTHESIS a FACT (riusa `DataType`,
+`app/models/enums.py`, nessun vocabolario nuovo), e scarta ogni claim che
+cita un `evidence_id` non presente nell'evidenza realmente fornita —
+mai accettato silenziosamente.
+
+`config/default.yaml`'s sezione `ai:` ristrutturata (da un `default_model/
+max_tokens/temperature` mai letto da nessun codice, confermato via grep)
+in `enabled/provider/local/cloud` — nuovo accessor `Settings.ai_config()`.
+`MockAIProvider` (`app/ai/mock_provider.py`) permette 27 test unitari
+(`tests/test_ai_provider.py`) senza Ollama reale, sezione 29/30 della
+spec — copertura: contratti, gateway, router (incluso l'errore controllato
+`AICloudNotImplementedError` per `provider: cloud`), bootstrap
+enabled/disabled, tutti gli stati di fallimento della sezione 27
+(AI_UNAVAILABLE/MODEL_UNAVAILABLE/AI_TIMEOUT/VALIDATION_ERROR/
+INSUFFICIENT_EVIDENCE), validazione evidence_ids, non-promozione di
+data_type.
+
+**Nessuna persistenza aggiunta in questa milestone** — `AIClaim` non
+diventa una tabella; `alembic check` infatti non rileva operazioni
+pendenti. Scelta deliberata, non un'omissione: persisterlo ora, prima che
+Milestone 10 definisca come un `AIClaim` alimenta uno `Score`/una
+`Opportunity`, avrebbe significato indovinare uno schema che quella
+milestone potrebbe dover cambiare.
+
+**Limite reale, non aggirato**: questo sandbox di sviluppo non può
+raggiungere né `ollama.com` né `huggingface.co` (403 a livello di policy
+di rete, confermato anche interrogando lo stato del proxy stesso) e non ha
+accesso alla VPS reale assegnata a Dinamik. Le sezioni 5, 6, 25, 30-31
+della spec (install reale, pull del modello, smoke test, benchmark, test
+di integrazione contro Qwen3 1.7B vero) non sono state eseguibili da
+questa sessione — comunicato a Fil prima di scrivere il resto del codice,
+non nel report finale. `tests/test_ai_ollama_integration.py` esiste,
+scritto per girare per davvero contro un'istanza Ollama reale, e si salta
+in modo pulito (skip, non fallimento, non un fake pass) quando Ollama non
+è raggiungibile — 2 test saltati nella run di verifica di questa sessione,
+per questo motivo esatto. `docs/architecture/local-ai.md` e
+`docs/architecture/local-ai-benchmark.md` documentano il blocco per
+intero, con un runbook copia-incolla per Fil (o una sessione futura con
+accesso alla VPS) e un template di benchmark deliberatamente vuoto — nessun
+numero stimato o copiato da benchmark pubblici, come la spec vieta
+esplicitamente.
+
+**Verifica eseguita**: 23 nuovi test — 21 in `tests/test_ai_provider.py`
+(tutti via `MockAIProvider`, nessuno richiede Ollama) + 2 in
+`tests/test_ai_ollama_integration.py` (scritti per girare contro Ollama
+reale, correttamente saltati in questa sessione per il motivo sopra).
+**190 test totali (188 passati, 2 saltati)**, `ruff check .`/`mypy app/`
+puliti su 10 nuovi file (`app/ai/provider.py`, `contracts.py`,
+`mock_provider.py`, `ollama_provider.py`, `gateway.py`, `router.py`,
+`bootstrap.py`, `analyst.py` + le due modifiche a `app/core/config.py` e
+`config/default.yaml`), `alembic check` senza operazioni pendenti (nessuna
+modifica di schema — scelta deliberata). Costo reale di questa milestone:
+**€0** — nessuna chiave API richiesta, nessuna chiamata a un provider
+cloud, `ai.cloud.enabled: false` per default.
