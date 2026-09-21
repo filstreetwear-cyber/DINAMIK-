@@ -45,6 +45,24 @@ _CHATBOT_SIGNATURES = [
 _SEARCH_SIGNATURES = ['type="search"', "role=\"search\"", "search-form", 'name="s"']
 
 
+_JS_SHELL_MIN_HTML_LENGTH = 500
+_JS_SHELL_MAX_VISIBLE_TEXT_LENGTH = 200
+
+
+def looks_js_rendered(html: str) -> bool:
+    """Heuristic for 'this HTTP response is a near-empty SPA shell, the
+    real content only exists after JS runs' — i.e. the HTTP acquisition
+    tier is not enough, escalate to the browser tier (provider.py). Not a
+    proof, just a signal: a long HTML document with little visible text is
+    the common shape of a client-rendered app; a short, content-ful page
+    is not, however few characters it has."""
+    if len(html) < _JS_SHELL_MIN_HTML_LENGTH:
+        return False
+    soup = BeautifulSoup(html, "lxml")
+    visible_text = soup.get_text(strip=True)
+    return len(visible_text) < _JS_SHELL_MAX_VISIBLE_TEXT_LENGTH
+
+
 def parse_website_html(html: str) -> dict[str, Any]:
     """Returns a dict of raw signals. Never raises on malformed HTML —
     BeautifulSoup with lxml is tolerant by design; a genuinely empty/broken

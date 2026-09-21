@@ -1,6 +1,6 @@
 # Dinamik Advisor — Amazon Intelligence Platform
 
-**Stato attuale: Milestone 1+2 completate. Refactor "Helium10 Optional + Provider/Capability" — Phase A (audit), Phase B (database) e Phase C (Capability/Provider/Registry/Orchestrator + provider Website/Amazon/Keepa) completate. Vedi `docs/architecture.md` (addendum 21/09) e `docs/refactor-audit-2026-09-21.md`.**
+**Stato attuale: Milestone 1+2 completate. Refactor "Helium10 Optional + Provider/Capability" — Phase A (audit), B (database), C (Capability/Provider/Registry/Orchestrator), D (Amazon/Keepa provider), E (Website: HTTP + HTML + JS/Browser fallback) e F (Browser Automation Engine, Playwright, verificato reale) completate. Phase G (Helium10) sospesa su tua decisione. Vedi `docs/architecture.md` (addendum 21/09) e `docs/refactor-audit-2026-09-21.md`.**
 
 Piattaforma proprietaria di Dinamik Advisor per l'individuazione, analisi e
 qualificazione di brand/seller Amazon con margine di crescita commerciale.
@@ -64,8 +64,8 @@ make lint
 
 - [x] 1 — Repository + architecture + config
 - [x] 2 — Database + migrations
-- [x] 3 — Tool abstraction layer — sostituita dal refactor Phase C: `app/tools/core/` (Capability/Provider/Registry/Orchestrator) + provider Website (reale)/Amazon/Keepa (mock)
-- [ ] 4 — Mock connectors — Amazon/Keepa coperti da Phase C; restano Jungle Scout/Perpetua (deprioritizzati) e Helium10 (sospeso)
+- [x] 3 — Tool abstraction layer — sostituita dal refactor Phase C-F: `app/tools/core/` (Capability/Provider/Registry/Orchestrator), provider Website (reale, con fallback JS/browser)/Amazon/Keepa (mock), Browser Automation Engine (Playwright, verificato reale)
+- [ ] 4 — Mock connectors — Amazon/Keepa coperti da Phase D; restano Jungle Scout/Perpetua (deprioritizzati) e Helium10 (sospeso, Phase G)
 - [ ] 5 — Amazon Scout discovery
 - [ ] 6 — Brand resolution
 - [ ] 7 — Deduplication

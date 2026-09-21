@@ -178,7 +178,12 @@ Milestone 1 e 2 completate e verificate (vedi `docs/database.md`). Prima dell'in
 Stato fasi:
 - **Phase A** (audit) — completata.
 - **Phase B** (database: colonne additive su `evidence`/`tool_calls`, tabelle `browser_sessions`/`browser_tasks`) — completata e verificata, vedi `docs/database.md` addendum.
-- **Phase C** (Capability/Provider/Registry/Orchestrator + Website/Amazon/Keepa provider, mock-first) — **completata**, vedi addendum sotto. Nessun codice specifico Helium10 (nessun file in `app/tools/helium10/`), come da decisione.
+- **Phase C** (Capability/Provider/Registry/Orchestrator) — **completata**, vedi addendum sotto.
+- **Phase D** (AmazonProvider, KeepaProvider) — **completata** (mock-only, nessuna credenziale confermata), vedi addendum sotto.
+- **Phase E** (WebsiteProvider: HTTP acquisition, HTML parser, JS fallback, Browser fallback) — **completata**, vedi addendum "Phase E+F" sotto.
+- **Phase F** (BrowserAutomationEngine, BrowserTask, BrowserSession, Playwright) — **completata in sostanza** (engine reale funzionante e verificato, non solo mock); BrowserWorker (Celery) rimandato perché Milestone 14 non è ancora iniziata — vedi dettagli sotto.
+- **Phase G** (Helium10Provider/BrowserProvider/ManualProvider) — **sospesa**, come da tua decisione 21/09. Nessun file in `app/tools/helium10/`.
+- Phase H (orchestrator: cost awareness) — parziale: routing/fallback/availability già in Phase C, cost-awareness reale rimandata (dipende dalla ristrutturazione di `config.py` per priorità/cost_model, ancora aperta).
 
 ---
 
@@ -201,3 +206,19 @@ Due provider reali collegati:
 **Verifica eseguita**: 27 nuovi test (registry, orchestrator fallback — incluso il caso esplicito "un bug reale in un provider non deve essere trattato come fallback", provider Website con HTML fisso via fixture e failure path, provider Amazon/Keepa mock), tutti verdi; i 14 test di Milestone 1/2/Phase B invariati e ancora verdi — 41/41, zero regressioni; `ruff` e `mypy app tests` puliti.
 
 **Limite onesto, non nascosto**: ho provato a verificare `WebsiteIntelligenceProvider` anche contro un sito reale (sellerfast.tech ed example.com), non solo con HTML fisso in test. Il sandbox in cui giro nega la connessione in uscita verso domini generici a livello di gateway (403 alla CONNECT, verificato via `__agentproxy/status` — non è il sito che blocca, è la policy di rete di questo ambiente). Il percorso di fetch HTTP è quindi verificato fino al livello "parsing + gestione errori", non end-to-end contro internet reale da qui — quella verifica va fatta dove il sistema girerà davvero (la VPS che Frank ha già assegnato al progetto).
+
+---
+
+## Addendum 2026-09-21 (3) — Refactor Phase D (Amazon/Keepa) + Phase E (Website escalation) + Phase F (Browser Engine)
+
+Ricevuto il dettaglio esatto delle fasi (C-K) dal documento originale — la mia numerazione nell'addendum precedente etichettava "Phase C" un lavoro che in realtà copriva anche Phase D. Correggo qui: Amazon/KeepaProvider (`app/tools/amazon/provider.py`, `app/tools/keepa/provider.py`) sono la Phase D, già costruiti e testati nel commit precedente — nessun nuovo codice necessario per dichiararla completa.
+
+**Phase E completata per davvero**, non solo HTTP: `app/tools/website/html_parser.py` aggiunge `looks_js_rendered()` — euristica (HTML lungo, testo visibile quasi assente = probabile SPA lato client). `WebsiteIntelligenceProvider.fetch()` ora prova prima il livello HTTP (economico), e se il risultato sembra un guscio JS-rendered, esegue l'escalation al livello browser (Phase F) per un fetch con JS eseguito, ri-parsando quell'HTML. Se anche il livello browser fallisce, il provider tiene il risultato HTTP originale invece di sollevare un'eccezione — un sito JS-heavy senza fallback funzionante è un dato informativo (bassa completezza dati), non un errore del provider. Penalità di confidenza esplicita (-10 punti) sui segnali ottenuti via browser, perché è un passo di inferenza in più rispetto al DOM servito direttamente.
+
+**Phase F**: `app/tools/browser/{task,session,engine,mock_engine}.py`. `BrowserAutomationEngine` genera due `task_type` generici, nessuno specifico di Helium10: `fetch_rendered_html` (quello che serve alla Phase E) e `check_requires_login` (rilevamento generico di un form di login — non tenta mai di autenticarsi, riporta solo `WAITING_FOR_HUMAN`). Motore reale basato su Playwright, usando il Chromium pre-installato in questo ambiente tramite il percorso stabile `/opt/pw-browsers/chromium` (indicato dalle istruzioni dell'ambiente stesso). **Verificato per davvero, non solo con mock**: lanciato un vero processo browser, navigato una pagina locale, letto l'HTML renderizzato, e — verifica esplicita del meccanismo umano-nel-loop — creata una pagina locale con un campo password e confermato che il motore reale ritorna `WAITING_FOR_HUMAN` senza tentare di interagire con il form. `BrowserWorker` (integrazione Celery) rimandato: Milestone 14 (workers/scheduler) non è ancora iniziata, `app/workers/` è vuoto — costruire un worker Celery ora significherebbe inventare un'infrastruttura che nessun'altra parte del sistema usa ancora. Ho costruito invece la funzione async riusabile (`BrowserAutomationEngine.run`) che quel worker chiamerà, senza forzare la forma dell'integrazione prima che serva davvero.
+
+`app/core/config.py` guadagna `browser_profiles_dir` e `browser_headless` (additivo). I profili browser vivono fuori dal repo (`.gitignore` aggiornato).
+
+**Bug di igiene dei test trovato e corretto durante la verifica**: la prima versione faceva sì che qualunque test toccasse il fallback browser di `WebsiteIntelligenceProvider` — anche con un motore mock iniettato — chiamasse comunque `resolve_session_handle()` con le impostazioni reali di default, creando `data/browser_profiles/` nella working tree come effetto collaterale della test suite. Corretto con una fixture `autouse` in `tests/conftest.py` che isola `BROWSER_PROFILES_DIR` per ogni test in una directory temporanea — trovato eseguendo la suite per davvero, non ipotizzato.
+
+**Verifica eseguita**: 13 nuovi test (motore mock, motore reale — inclusi i due test end-to-end su Playwright reale, non skippati in questo ambiente perché il binario Chromium è presente —, escalation/non-escalation del provider Website, fallback-del-fallback quando il livello browser non produce nulla di utilizzabile). 54/54 totali verdi, zero regressioni. `ruff` e `mypy app tests` puliti. `alembic check` pulito (nessuna modifica di schema in questa fase).

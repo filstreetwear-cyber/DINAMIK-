@@ -100,6 +100,14 @@ class Settings(BaseSettings):
     enable_scheduler: bool = Field(default=False, alias="ENABLE_SCHEDULER")
     enable_export: bool = Field(default=True, alias="ENABLE_EXPORT")
 
+    # --- browser automation (Phase F, refactor 2026-09-21) ---
+    # Where persistent browser profiles (cookies/local storage for
+    # logged-in sessions) live on disk. On the assigned VPS this should be
+    # a mounted volume (Phase J) so a human login survives a redeploy;
+    # locally it defaults to a repo-relative, gitignored folder.
+    browser_profiles_dir: str = Field(default="data/browser_profiles", alias="BROWSER_PROFILES_DIR")
+    browser_headless: bool = Field(default=True, alias="BROWSER_HEADLESS")
+
     # populated from YAML after construction, not an env var
     yaml_config: dict[str, Any] = Field(default_factory=dict, exclude=True)
 
