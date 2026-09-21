@@ -310,3 +310,67 @@ restano quelli verificati nell'addendum (6), invariati.
 `app.workers.celery_app`, che non esiste — Milestone 14), e tutte le
 Milestone 6-17/19 non ancora affrontate (vedi README, sezione Milestone,
 per l'elenco completo con stato).
+
+## Addendum 2026-09-21 (8) — Milestone 6: Brand resolution
+
+Prima milestone dopo la fine dell'ordinamento Phase A→K — sequenza normale
+del documento di refactor, non più una fase con lettera propria. Regole
+deterministiche, nessuna AI (Milestone 10): dato un `ResearchResult` grezzo
+prodotto da Milestone 5, risolve o crea le righe `AmazonSeller`/`Brand`/
+`AmazonProduct` implicate dal suo `raw_payload` e valorizza
+`ResearchResult.product_id`/`brand_id`, lasciati `NULL` apposta da discovery.
+
+- **`app/services/brand_resolution.py`**, nuovo: `resolve_research_result()`
+  (una riga) e `resolve_research_job()` (l'intero job, con lo stesso pattern
+  agent-run/try-except-boundary di `discovery.py` — un `AgentRun` proprio,
+  `agent_name="brand_resolver"`, non riutilizza quello di Milestone 5).
+  Quattro regole (`BrandResolutionRule`, enum locale al modulo, non in
+  `app/models/enums.py` — stessa scelta già fatta per `BrowserTaskSpec`/
+  `Outcome`, vive vicino a chi la usa): `NEW_BRAND_CREATED`,
+  `EXACT_BRAND_NAME_MATCH` (match case-insensitive esatto, niente
+  fuzzy — quello è Milestone 7), `EXISTING_SELLER_LINK` (un seller già
+  visto riusa il suo link, non viene ri-collegato a ogni osservazione),
+  `UNRESOLVED_MISSING_DATA` (arricchimento parziale di Milestone 5 — vedi
+  il gap `enriched_any` nell'addendum (5) — il prodotto si risolve comunque,
+  il brand no; non è un errore, è registrato come tale).
+- **Decisione deliberata, non ovvia**: `AmazonSeller.verified` non viene
+  **mai** impostato `True` da questo modulo, nemmeno quando la risoluzione
+  è certa al 100% (un ASIN o combacia con un prodotto esistente o no — quella
+  parte è esatta). La co-occorrenza di seller e brand su un singolo listing
+  Amazon non è conferma indipendente che quel seller rappresenti quel
+  brand — un rivenditore può listare un prodotto sotto un brand che non
+  possiede. `verified` resta riservato a Milestone 10 (AI) o a una revisione
+  umana futura. Il commento di design già presente in `app/models/amazon.py`
+  ("BrandResolver, prima le regole poi l'AI") è quello che questo modulo
+  implementa alla lettera — non l'ho scritto io ora, esisteva da prima.
+- **Gestione conflitto**: se un seller già collegato a un brand osserva un
+  nome brand diverso in una nuova rilevazione, il link ESISTENTE viene
+  mantenuto (mai sovrascritto silenziosamente) e `outcome.conflict=True`
+  genera un `AgentEvent` dedicato (`seller_brand_conflict`) — la discrepanza
+  è visibile, non persa.
+- **`resolve_research_job()` non tocca `ResearchJob.status`** di proposito —
+  quel campo appartiene alla discovery (Milestone 5, COMPLETED/PARTIAL/
+  FAILED) e sovrascriverlo qui confonderebbe due fasi diverse della
+  pipeline in un solo campo. Il successo/fallimento di questa fase vive
+  solo sul suo `AgentRun`.
+- **Esplicitamente fuori ambito, per scelta**: company resolution
+  (`Brand.company_id` resta `NULL` — servirebbe una capability
+  `WEBSITE_DATA` sul brand scoperto che questa pipeline non chiama ancora);
+  deduplicazione tra nomi quasi-uguali (Milestone 7); `price`/`currency` su
+  `AmazonProduct` (Milestone 5 non chiama mai `PRODUCT_PRICE`).
+
+**Verifica eseguita**: 10 nuovi test (`tests/test_brand_resolution.py`) —
+le quattro regole individualmente, `verified` che resta `False` dopo
+risoluzione puramente deterministica, il conflitto seller/brand (link
+esistente mantenuto, evento registrato), il job driver che salta risultati
+già risolti (`product_id IS NOT NULL`), un test end-to-end reale che
+incatena Milestone 5 (`run_amazon_scout_discovery`) in Milestone 6
+(`resolve_research_job`) e verifica che i due ASIN del fixture mock
+(entrambi `seller_id=MOCKSELLER01`, `brand="MockBrand Kitchenware"`)
+collassino in esattamente un `Brand` e un `AmazonSeller`, con entrambi i
+prodotti collegati, e un'eccezione non gestita catturata al confine
+dell'agent-run (stesso pattern di `discovery.py`). 95/95 test totali verdi
+(85 + 10), zero regressioni, eseguiti per davvero contro un Postgres locale
+reale. `ruff`, `mypy app tests` puliti; `alembic check` conferma nessuna
+operazione di schema pendente — Milestone 6 non tocca il modello dati,
+solo righe già esistenti nelle tabelle già create in Milestone 2.

@@ -1,6 +1,6 @@
 # Dinamik Advisor — Amazon Intelligence Platform
 
-**Stato attuale: refactor "Helium10 Optional + Provider/Capability" completo, Phase A→K (A audit, B database, C Capability/Provider/Registry/Orchestrator, D Amazon/Keepa, E Website HTTP+HTML+JS/Browser fallback, F Browser Automation Engine reale, H orchestrator cost/confidence/availability, I/Milestone 5 Amazon Scout discovery, J Docker/VPS, K documentazione). Phase G (Helium10) sospesa su tua decisione — unico tratto mancante dell'ordinamento che hai dato. Build/run reali delle immagini Docker non verificabili in questo sandbox (nessun demone Docker) — vedi `docs/deployment.md`. Documentazione per argomento in `docs/`: [`tools.md`](docs/tools.md), [`providers.md`](docs/providers.md), [`browser.md`](docs/browser.md), [`deployment.md`](docs/deployment.md), [`database.md`](docs/database.md); `docs/architecture.md` è il registro cronologico delle decisioni.**
+**Stato attuale: refactor "Helium10 Optional + Provider/Capability" Phase A→K completato, più Milestone 6 (Brand resolution) della sequenza normale del documento di refactor. Phase G (Helium10) sospesa su tua decisione. Build/run reali delle immagini Docker non verificabili in questo sandbox (nessun demone Docker) — vedi `docs/deployment.md`. Documentazione per argomento in `docs/`: [`tools.md`](docs/tools.md), [`providers.md`](docs/providers.md), [`browser.md`](docs/browser.md), [`deployment.md`](docs/deployment.md), [`database.md`](docs/database.md); `docs/architecture.md` è il registro cronologico delle decisioni.**
 
 Piattaforma proprietaria di Dinamik Advisor per l'individuazione, analisi e
 qualificazione di brand/seller Amazon con margine di crescita commerciale.
@@ -92,7 +92,7 @@ Quattro servizi: `postgres`, `redis`, `api` (esegue le migration Alembic all'avv
 - [x] 3 — Tool abstraction layer — sostituita dal refactor Phase C-F: `app/tools/core/` (Capability/Provider/Registry/Orchestrator), provider Website (reale, con fallback JS/browser)/Amazon/Keepa (mock), Browser Automation Engine (Playwright, verificato reale)
 - [ ] 4 — Mock connectors — Amazon/Keepa coperti da Phase D; restano Jungle Scout/Perpetua (deprioritizzati) e Helium10 (sospeso, Phase G)
 - [x] 5 — Amazon Scout discovery — `app/agents/amazon_scout/discovery.py`; produce solo ResearchResult/Evidence grezzi, nessuna risoluzione brand/dedup/scoring/AI (vedi `docs/architecture.md` addendum 21/09 (5))
-- [ ] 6 — Brand resolution
+- [x] 6 — Brand resolution — `app/services/brand_resolution.py`, regole deterministiche (no AI): risolve/crea AmazonSeller/Brand/AmazonProduct da un ResearchResult grezzo; `AmazonSeller.verified` resta sempre `False` (riservato a Milestone 10/revisione umana); company resolution e dedup nomi-brand restano fuori ambito (vedi `docs/architecture.md` addendum 21/09 (8))
 - [ ] 7 — Deduplication
 - [ ] 8 — Opportunity engine
 - [ ] 9 — Scoring
