@@ -52,6 +52,14 @@ class Brand(UUIDPrimaryKeyMixin, TimestampMixin, Base):
         DateTime(timezone=True), default=utcnow, onupdate=utcnow
     )
     status: Mapped[str] = mapped_column(String(50), default="ACTIVE")
+    # Milestone 7 (deduplication): set only when status == "MERGED" — points
+    # at the canonical Brand this row was folded into. Without this pointer
+    # "MERGED" would be a dead-end status with no way to find the surviving
+    # row; SET NULL (not CASCADE) because losing the canonical brand later
+    # should not delete the history that it once absorbed a duplicate.
+    merged_into_id: Mapped[uuid.UUID | None] = mapped_column(
+        ForeignKey("brands.id", ondelete="SET NULL"), nullable=True, index=True
+    )
 
     company: Mapped[Company | None] = relationship(back_populates="brands")
     sellers: Mapped[list[AmazonSeller]] = relationship(back_populates="brand")

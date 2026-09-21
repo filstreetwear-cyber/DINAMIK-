@@ -374,3 +374,92 @@ dell'agent-run (stesso pattern di `discovery.py`). 95/95 test totali verdi
 reale. `ruff`, `mypy app tests` puliti; `alembic check` conferma nessuna
 operazione di schema pendente — Milestone 6 non tocca il modello dati,
 solo righe già esistenti nelle tabelle già create in Milestone 2.
+
+## Addendum 2026-09-21 (9) — cap mancante su resolve_research_job + Milestone 7: Deduplication
+
+**Correzione a Milestone 6, prima di procedere**: `resolve_research_job()`
+non aveva alcun limite sul numero di `ResearchResult` processati in una
+sola chiamata/transazione, a differenza di `run_amazon_scout_discovery`
+(`max_products=20`). Su 2 ASIN mock non si vedeva; su un job reale con
+centinaia di risultati significava centinaia di insert `AgentEvent` in una
+singola transazione. Aggiunto `max_results: int = 100`, con `ORDER BY
+created_at` + `LIMIT` — pensata per essere richiamata più volte (un futuro
+scheduler, Milestone 14) finché non ritorna meno del cap, non per smaltire
+l'intero backlog in una chiamata. Nuovo test
+(`test_job_driver_respects_max_results_cap`) verifica il comportamento su
+più chiamate consecutive. 96/96 test (95 + 1), `ruff`/`mypy`/`alembic
+check` puliti.
+
+**Milestone 7: Deduplication** — `app/services/brand_deduplication.py`,
+nuovo. Milestone 6 crea un `Brand` nuovo alla prima osservazione di un nome
+e fa match solo su uguaglianza esatta case-insensitive dopo — la sua stessa
+docstring rimanda qui tutto ciò che è più sfumato. Due osservazioni dello
+stesso brand reale possono quindi finire su due righe `Brand` separate
+("Acme Kitchenware" vs "Acme Kitchenware Srl" vs "ACME KITCHENWARE,
+S.R.L."). Due livelli di confidenza, tenuti deliberatamente separati —
+stessa disciplina che `brand_resolution.py` applica a
+`AmazonSeller.verified`:
+
+- **Esatto dopo normalizzazione -> merge automatico.** `normalize_brand_name()`
+  minuscolo, spoglia accenti/punteggiatura, elimina un suffisso di forma
+  legale noto (Srl, Ltd, GmbH, ... — lista esplicitamente non esaustiva,
+  IT/EN/DE/NL/ES/UK) mantenendo il collasso degli acronimi puntati
+  ("S.R.L." -> "srl" come singolo token, non tre token "s"/"r"/"l" — bug
+  reale scoperto e corretto durante la scrittura di questo modulo, prima di
+  scrivere i test: senza quel passaggio "ACME KITCHENWARE, S.R.L." non
+  avrebbe mai fatto match con "Acme Kitchenware Srl"). Non cambia *quale*
+  azienda un nome indica — è la stessa disciplina della Milestone 6 per il
+  match esatto sul nome brand.
+- **Similarità alta dopo normalizzazione, ma non esatta -> solo segnalato,
+  mai unito automaticamente.** `difflib.SequenceMatcher` (stdlib, non AI),
+  soglia `DEFAULT_SIMILARITY_THRESHOLD=0.88` calibrata su casi reali
+  ("acme kitchenware"/"acme kitchen ware" -> 0.97, unito solo se sopra
+  soglia; "acme kitchenware"/"zenith kitchenware" -> 0.765, mai unito).
+  Un merge automatico qui rischierebbe di fondere silenziosamente due
+  aziende reali distinte — rischio maggiore di lasciare due righe in giro
+  più a lungo. Registrato come `AgentEvent` (`duplicate_candidate`) per
+  revisione futura (umana o Milestone 10/AI), non risolto qui.
+- **Nuova colonna** `Brand.merged_into_id` (self-FK, `ondelete=SET NULL`,
+  migration `8b2573c4b9e4`) — senza un puntatore, `status="MERGED"` sarebbe
+  uno stato senza uscita, non ricostruibile. La riga duplicata non viene
+  mai cancellata (cancellarla avrebbe comunque `SET NULL` sui figli già
+  ripuntati, quindi nessun vantaggio, solo perdita di storia/audit).
+  Nota tecnica sulla migration: l'autogenerate di Alembic ha renderizzato
+  il vincolo FK senza nome (nessuna naming convention configurata su questo
+  progetto — stesso gap preesistente per altri FK come
+  `categories.parent_category_id`), il che avrebbe fatto fallire il
+  downgrade (`drop_constraint(None, ...)`); corretto dandogli un nome
+  esplicito e verificato con un vero giro upgrade→downgrade→upgrade contro
+  Postgres locale, non solo `alembic check` sull'upgrade.
+- **Selezione del canonico**: `first_seen_at` più antico vince (la prima
+  osservazione reale), pareggio spezzato sull'id — deterministico, non
+  dipendente dall'ordine di iterazione.
+- **Conflitto su `company_id`**: se canonico e duplicato hanno
+  `company_id` diversi e non nulli, quello del canonico resta (mai
+  sovrascritto silenziosamente), evento `brand_merge_company_conflict`
+  registrato — stessa disciplina del conflitto seller/brand di Milestone 6.
+  Se solo il duplicato ha `company_id`, viene copiato sul canonico (colma
+  un vuoto, non è un conflitto).
+- **Cap**: `max_brands=200`, stessa logica di `resolve_research_job` —
+  pensato per chiamate ripetute, `summary.truncated` dice se questa
+  chiamata ha visto tutto.
+- **Esplicitamente fuori ambito**: normalizzazione non-Latina (documentato,
+  nessun dato reale oggi la richiede — unico marketplace vivo è "IT");
+  una coda/UI di revisione per i `duplicate_candidate` (Milestone 12/13);
+  l'un-merge (nessun meccanismo per invertire una fusione).
+
+**Verifica eseguita**: 17 nuovi test (`tests/test_brand_deduplication.py`)
+— 7 unitari puri su `normalize_brand_name` (incl. il bug degli acronimi
+puntati e la guardia contro una normalizzazione vuota per un nome fatto
+solo di suffisso, es. un brand chiamato letteralmente "LLC"), poi contro
+Postgres reale: merge automatico con verifica di tutti i figli ripuntati
+(seller/prodotto/research result) ed eventi registrati, selezione del
+canonico per `first_seen_at`, gruppo di 3 duplicati che collassa in un
+canonico, conflitto `company_id` (mantenuto + segnalato) e colmatura senza
+conflitto, near-duplicate segnalato ma non unito, brand non correlati che
+non generano nessun evento, un brand già `MERGED` escluso da una chiamata
+successiva, il cap `max_brands`/`truncated` su chiamate ripetute, e
+un'eccezione non gestita catturata al confine dell'agent-run. **113/113
+test totali verdi** (96 + 17), `ruff`/`mypy app tests` puliti, `alembic
+check` senza operazioni pendenti dopo l'applicazione della migration
+(verificata upgrade/downgrade/upgrade reale, non solo `check`).

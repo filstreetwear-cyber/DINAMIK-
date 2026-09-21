@@ -257,10 +257,24 @@ async def resolve_research_result(session: AsyncSession, result: ResearchResult)
     )
 
 
-async def resolve_research_job(session: AsyncSession, job: ResearchJob) -> BrandResolutionJobSummary:
-    """Resolves every ResearchResult belonging to `job` that still has
-    product_id IS NULL. An already-resolved result (e.g. running this
-    twice over the same job) is left untouched, not re-processed.
+async def resolve_research_job(
+    session: AsyncSession, job: ResearchJob, max_results: int = 100
+) -> BrandResolutionJobSummary:
+    """Resolves up to `max_results` ResearchResult rows belonging to `job`
+    that still have product_id IS NULL. An already-resolved result (e.g.
+    running this twice over the same job) is left untouched, not
+    re-processed.
+
+    `max_results` exists for the same reason `run_amazon_scout_discovery`
+    caps at `max_products=20`: a job can accumulate an unbounded number of
+    pending ResearchResult rows, and processing all of them in one
+    transaction — one AgentEvent insert or two per row — doesn't scale to a
+    job with hundreds or thousands of results. Unlike discovery, this
+    function is meant to be called repeatedly (e.g. by a future scheduler,
+    Milestone 14) until it returns `processed < max_results`, meaning the
+    backlog for this job is drained; each call only ever sees rows the
+    previous call didn't already resolve, since the query filters on
+    product_id IS NULL.
 
     Deliberately does NOT touch job.status — that field belongs to the
     discovery step (Milestone 5) and already carries its own COMPLETED/
@@ -271,7 +285,7 @@ async def resolve_research_job(session: AsyncSession, job: ResearchJob) -> Brand
     agent_run = AgentRun(
         agent_name="brand_resolver",
         job_id=job.id,
-        input={"job_id": str(job.id)},
+        input={"job_id": str(job.id), "max_results": max_results},
         status="RUNNING",
     )
     session.add(agent_run)
@@ -283,9 +297,10 @@ async def resolve_research_job(session: AsyncSession, job: ResearchJob) -> Brand
         pending = (
             (
                 await session.execute(
-                    select(ResearchResult).where(
-                        ResearchResult.job_id == job.id, ResearchResult.product_id.is_(None)
-                    )
+                    select(ResearchResult)
+                    .where(ResearchResult.job_id == job.id, ResearchResult.product_id.is_(None))
+                    .order_by(ResearchResult.created_at)
+                    .limit(max_results)
                 )
             )
             .scalars()

@@ -306,6 +306,51 @@ async def test_missing_asin_or_marketplace_resolves_nothing(session: AsyncSessio
 
 
 @pytest.mark.asyncio
+async def test_job_driver_respects_max_results_cap(session: AsyncSession):
+    """A job with more pending results than max_results must only process
+    the cap in one call — repeated calls drain the rest. Distinct ASINs and
+    seller_ids per result so each one actually creates its own rows, making
+    an off-by-one in the cap visible as a row-count mismatch, not just a
+    processed-count mismatch."""
+    job = _new_job()
+    session.add(job)
+    await session.flush()
+
+    for i in range(5):
+        session.add(
+            _new_result(
+                job,
+                asin=f"B0MOCKCAP{i}",
+                seller_id=f"MOCKSELLERCAP{i}",
+                brand=f"Cap Brand {i}",
+            )
+        )
+    await session.flush()
+
+    first_summary = await resolve_research_job(session, job, max_results=3)
+    assert first_summary.processed == 3
+
+    remaining = (
+        (
+            await session.execute(
+                select(ResearchResult).where(
+                    ResearchResult.job_id == job.id, ResearchResult.product_id.is_(None)
+                )
+            )
+        )
+        .scalars()
+        .all()
+    )
+    assert len(remaining) == 2  # exactly the ones the cap left untouched
+
+    second_summary = await resolve_research_job(session, job, max_results=3)
+    assert second_summary.processed == 2  # backlog drained, no more than what's left
+
+    third_summary = await resolve_research_job(session, job, max_results=3)
+    assert third_summary.processed == 0  # nothing left — safe to call again
+
+
+@pytest.mark.asyncio
 async def test_job_driver_skips_already_resolved_results(session: AsyncSession):
     job = _new_job()
     session.add(job)
