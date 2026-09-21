@@ -1,0 +1,72 @@
+marketplaces:
+  - IT
+  - DE
+  - FR
+  - ES
+  - UK
+  - US
+
+default_marketplace: IT
+
+scoring:
+  weights:
+    amazon_opportunity: 0.25
+    listing_opportunity: 0.20
+    advertising_opportunity: 0.15
+    website_opportunity: 0.15
+    seller_fast_fit: 0.10
+    business_value: 0.15
+  confidence:
+    increase_on:
+      - multiple_sources_agree
+      - recent_data
+      - direct_data
+      - verifiable_data
+    decrease_on:
+      - estimated_data
+      - conflicting_sources
+      - stale_data
+      - incomplete_information
+      - ai_inference
+
+retry:
+  network_error:
+    max_attempts: 3
+    backoff: fixed
+  rate_limit:
+    max_attempts: 5
+    backoff: exponential
+  auth_error:
+    max_attempts: 0
+  invalid_request:
+    max_attempts: 0
+  ai_timeout:
+    max_attempts: 2
+    backoff: fixed
+
+rate_limits:
+  keepa:
+    requests_per_minute: 60
+  junglescout:
+    requests_per_minute: 30
+  perpetua:
+    requests_per_minute: 30
+  helium10:
+    requests_per_minute: 30
+  ai:
+    requests_per_minute: 50
+
+ai:
+  default_model: claude-sonnet-4-5
+  max_tokens: 4096
+  temperature: 0.2
+
+scheduler:
+  enabled: false
+  research_job_cron: "0 8 * * 1"
+
+cache:
+  default_ttl_seconds: 86400
+
+data_freshness:
+  stale_after_days: 14

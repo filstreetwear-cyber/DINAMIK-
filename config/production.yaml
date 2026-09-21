@@ -1,0 +1,9 @@
+scheduler:
+  enabled: true
+
+cache:
+  default_ttl_seconds: 86400
+
+rate_limits:
+  keepa:
+    requests_per_minute: 120
