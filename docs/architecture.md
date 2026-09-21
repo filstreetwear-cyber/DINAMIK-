@@ -567,3 +567,65 @@ da solo → `BUSINESS_VALUE` HIGH). **134/134 test totali verdi** (116 +
 18), `ruff`/`mypy app tests` puliti, `alembic check` senza operazioni
 pendenti (nessuna modifica di schema — `Opportunity` esiste già dalla
 Milestone 2).
+
+### (12) Milestone 8.5 — Audit + Agent Registry + Data Contracts + valutazione browser/dev-tooling (21/09)
+
+Specifica esterna di Fil, 42 sezioni, con una regola esplicita in
+apertura: audit prima di qualunque modifica ("non riscrivere alla cieca").
+Quattro documenti nuovi in `docs/architecture/` (directory nuova, coesiste
+con questo file — questo resta il registro cronologico, quelli sono
+riferimenti per-argomento come `docs/tools.md`/`docs/providers.md`):
+
+- `milestone-8.5-audit.md` — mappa la specifica sull'architettura
+  esistente. Scoperta principale: gran parte di quanto chiesto esiste già
+  (Capability/Provider/Registry/Orchestrator, Evidence, gerarchia
+  `ProviderError` con `ProviderRequiresHumanError`, `BrowserAutomationEngine`)
+  sotto nomi diversi. Gap reali confermati: nessun Agent Registry (un solo
+  agente esisteva), `AmazonListing`/`AdvertisingData` mai popolate,
+  `Brand.website` mai collegato a discovery, Seller Fast Fit senza criteri
+  mai specificati (confermato anche via note personali di Fil — resta
+  `NOT FORMALLY SPECIFIED`, nessun criterio inventato).
+- `browser-abstraction.md` — Playwright MCP e Browser Use **installati e
+  testati per davvero** (non solo documentati) contro il Chromium reale
+  del sandbox. Playwright MCP: funziona al 100%, 25 tool reali via
+  handshake MCP completo — `INTEGRATE_OPTIONAL`, non ora (nessun consumer
+  interattivo esiste oggi, i suoi tool a esecuzione libera non sono
+  adeguati a una pipeline automatica). Browser Use: funziona (motore CDP
+  proprio, non più Playwright dalla 0.13) — `EVALUATE_LATER`, trigger
+  esplicito = sblocco di Phase G (Helium10, sospesa da Frank).
+- `opportunity-data-matrix.md` — le 6 righe di `OpportunityType` in una
+  vista sola, con il Data Contract corrispondente e la distinzione tra
+  "manca il provider" (Advertising), "manca solo il collegamento nella
+  pipeline" (Website — il provider esiste già) e "manca la specifica
+  stessa, non la tecnica" (Seller Fast Fit).
+- `development-agents.md` — SWE-agent (`REJECT`: duplicherebbe l'agente
+  di sviluppo autonomo che questa sessione già è, senza il checkpoint
+  umano che governa ogni fase di questo progetto), Deep Agents e Agno
+  (`EVALUATE_LATER` entrambi, stesso trigger: quando Milestone 11 — Agent
+  orchestration — viene affrontata, non prima e non isolatamente).
+
+**Codice nuovo** (i due gap reali, non i pezzi già esistenti):
+
+- `app/agents/registry.py` (`AgentRegistry`/`AgentMetadata`) +
+  `app/agents/bootstrap.py` (`build_default_agent_registry()`) — stesso
+  pattern di `app/tools/core/registry.py`/`bootstrap.py` per coerenza, ma
+  **non** una riscrittura di `amazon_scout/discovery.py` in una gerarchia
+  di classi: l'entrypoint esistente (funzione, già testata) viene
+  registrato così com'è. Un solo agente registrato oggi, perché un solo
+  agente esiste.
+- `app/schemas/contracts.py` — `AmazonProductContract`/
+  `AmazonListingContract`/`WebsiteDataContract` con conversioni
+  `from_orm_*` reali e testate; `AdvertisingDataContract`/
+  `SellerFastFitContract` come sola forma, deliberatamente senza alcuna
+  factory (verificato da un test che la assenza sia reale, non solo
+  dichiarata) — nessun dato da cui costruirle esiste. `opportunity_engine.py`
+  **non** viene migrato su questi contratti in questa milestone: funziona
+  già ed è testato contro le righe ORM direttamente; farlo ora avrebbe
+  toccato codice funzionante per un guadagno cosmetico, contro la stessa
+  regola "preferisci il refactoring incrementale" della specifica.
+
+**Verifica eseguita**: 20 nuovi test (11 Agent Registry, 9 Data Contracts)
+— **154/154 test totali verdi**, `ruff check .` e `mypy app/` puliti su
+tutto il progetto. Nessuna modifica di schema in questa fase (Agent
+Registry e Data Contracts sono puro Python, nessuna tabella nuova) — nessun
+`alembic check` necessario.
