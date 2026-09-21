@@ -16,11 +16,14 @@ operation only runs unattended if it is actually as certain as it claims
 to be.
 
 * **Exact-after-normalization -> auto-merge.** Lowercasing, stripping
-  accents/punctuation, and dropping a known legal-entity suffix (Srl, Ltd,
-  GmbH, ...) does not change *which* company a name refers to — "Acme
-  Kitchenware" and "ACME KITCHENWARE, S.R.L." are the same claim in two
-  spellings, not two claims. Rows in this tier are merged automatically,
-  same as Milestone 6 auto-links an exact brand-name match.
+  accents/punctuation, and dropping a known *unambiguous* legal-entity
+  suffix (Srl, Ltd, GmbH, ...) does not change *which* company a name
+  refers to — "Acme Kitchenware" and "ACME KITCHENWARE, S.R.L." are the
+  same claim in two spellings, not two claims. Rows in this tier are
+  merged automatically, same as Milestone 6 auto-links an exact
+  brand-name match. Only `_STRONG_LEGAL_SUFFIXES` are stripped here —
+  see the note on `_WEAK_LEGAL_SUFFIXES` below for why some suffix tokens
+  are deliberately excluded from this tier.
 * **High textual similarity after normalization, but not exact -> flagged,
   never merged.** "Acme Kitchenware" vs "Acme Kitchen Ware" is *probably*
   the same brand; "Acme Kitchenware" vs "Zenith Kitchenware" is *probably
@@ -30,7 +33,30 @@ to be.
   around a bit longer. Candidates are recorded as `AgentEvent`s
   (`duplicate_candidate`) for a human (or, later, Milestone 10's AI layer,
   which can bring more signal than a name string) to resolve — not
-  auto-resolved here.
+  auto-resolved here. This tier ALSO strips `_WEAK_LEGAL_SUFFIXES` (see
+  below), so two names that differ only by one of those ambiguous tokens
+  end up flagged, not silently ignored.
+
+**Why two suffix lists, not one.** `_STRONG_LEGAL_SUFFIXES` (Srl, Spa,
+Snc, Sas, Ltd, LLC, Inc, Corp, GmbH, Plc) are long enough, and specific
+enough as legal-form markers, that stripping them from the end of a name
+is safe to do unattended -- there's no real brand out there that just
+happens to end in the word "Gmbh" for an unrelated reason.
+`_WEAK_LEGAL_SUFFIXES` (Co, Sa, Ag, Sl, Nv, Bv) are two- or three-letter
+tokens that double as initials, abbreviations, or plain words having
+nothing to do with legal form -- stripping them in the auto-merge tier
+would have meant "Roma Co" and "Roma Corp" (or, worse, two *actually
+unrelated* short brand names that happen to both end in a common
+two-letter combination) collapse into one Brand row with no way back
+(`merged_into_id` records direction, nothing reverses it — see "out of
+scope" below). Keeping them in the auto-merge tier optimizes for catching
+more spelling variants at the cost of a real, unbounded risk of silently
+fusing two distinct companies; keeping them out of it and only using them
+to widen tier 2's net accepts a few more candidates needing a human look
+in exchange for zero risk of an unattended false merge. Discovered while
+building this module, not left in from a first draft: the original
+suffix list stripped both kinds in the same pass, entirely in the
+auto-merge tier, before this tradeoff was made explicit and fixed.
 
 Both tiers use `difflib.SequenceMatcher` (Python stdlib) for the similarity
 score — not an embedding model, not AI. Rules before AI is a standing
@@ -80,18 +106,28 @@ from app.models import (
 from app.models.enums import ErrorCategory
 
 # Not exhaustive — Italian (this project's only live marketplace, "IT") and
-# the most common English/EU forms. Expanding this list is cheap, low-risk
-# future work (it only ever makes normalization MORE aggressive at merging
-# obvious spelling variants), not a blocker for this milestone.
-_LEGAL_SUFFIXES = frozenset(
+# the most common English/EU forms. Expanding either list is cheap, but the
+# two are NOT interchangeable — see the module docstring's "why two suffix
+# lists" note. Long/unambiguous legal-form markers only: safe to strip
+# unattended, used by the auto-merge tier.
+_STRONG_LEGAL_SUFFIXES = frozenset(
     {
         "srl", "srls", "spa", "snc", "sas",  # Italian
-        "ltd", "llc", "inc", "corp", "co",  # English / US
+        "ltd", "llc", "inc", "corp",  # English / US
         "gmbh",  # German
-        "bv", "nv",  # Dutch / Belgian
-        "ag",  # Swiss / German
         "plc",  # UK
-        "sl", "sa",  # Spanish
+    }
+)
+# Short tokens that double as initials/abbreviations/ordinary words as
+# often as they mark a legal form. Stripped ONLY when explicitly requested
+# (the near-duplicate flagging tier) -- never in the auto-merge tier.
+_WEAK_LEGAL_SUFFIXES = frozenset(
+    {
+        "co",  # English "Company" -- also just two letters, common as initials
+        "sa",  # Spanish/French "Sociedad/Société Anonyme" -- also just initials
+        "ag",  # Swiss/German "Aktiengesellschaft" -- also just initials
+        "sl",  # Spanish "Sociedad Limitada" -- also just initials
+        "nv", "bv",  # Dutch/Belgian -- also just initials
     }
 )
 
@@ -115,12 +151,21 @@ _ACRONYM_DOT_RE = re.compile(r"(?<=[a-z0-9])\.(?=[a-z0-9])")
 DEFAULT_SIMILARITY_THRESHOLD = 0.88
 
 
-def normalize_brand_name(name: str) -> str:
+def normalize_brand_name(name: str, *, strip_weak_suffixes: bool = False) -> str:
     """Lowercase, strip accents/punctuation, collapse whitespace, drop a
     trailing legal-entity suffix token. Never returns an empty string for a
     non-empty input -- if stripping suffix tokens would consume the whole
     name (e.g. a brand literally named "LLC"), the pre-suffix-strip form is
-    kept instead."""
+    kept instead.
+
+    `strip_weak_suffixes=False` (the default, used for the auto-merge
+    tier) only strips `_STRONG_LEGAL_SUFFIXES` -- unambiguous legal-form
+    markers. `strip_weak_suffixes=True` (used only by the near-duplicate
+    flagging tier, which never auto-merges) additionally strips
+    `_WEAK_LEGAL_SUFFIXES` -- short tokens too easily confused with
+    initials or ordinary words to strip unattended. See the module
+    docstring's "why two suffix lists" note.
+    """
     text = unicodedata.normalize("NFKD", name)
     text = "".join(ch for ch in text if not unicodedata.combining(ch))
     text = text.lower()
@@ -129,8 +174,9 @@ def normalize_brand_name(name: str) -> str:
     tokens = _WHITESPACE_RE.sub(" ", text).strip().split(" ")
     tokens = [t for t in tokens if t]
 
+    allowed_suffixes = _STRONG_LEGAL_SUFFIXES | _WEAK_LEGAL_SUFFIXES if strip_weak_suffixes else _STRONG_LEGAL_SUFFIXES
     without_suffix = list(tokens)
-    while without_suffix and without_suffix[-1] in _LEGAL_SUFFIXES:
+    while without_suffix and without_suffix[-1] in allowed_suffixes:
         without_suffix.pop()
 
     final_tokens = without_suffix if without_suffix else tokens
@@ -300,13 +346,20 @@ async def run_brand_deduplication(session: AsyncSession, max_brands: int = 200) 
                 )
 
         # --- Tier 2: high similarity, not exact -> flag only ---
+        # Uses strip_weak_suffixes=True -- safe here specifically because
+        # this tier never auto-merges (see module docstring): a pair that
+        # only differs by "Co"/"Sa"/"Ag"/... now surfaces as a candidate
+        # instead of being silently invisible to both tiers. A ratio of
+        # exactly 1.0 here (weak-normalized forms identical, e.g. "Acme Co"
+        # vs "Acme AG") is still only ever flagged, never merged -- survivors
+        # already exclude everything tier 1 merged, and tier 1 only strips
+        # strong suffixes, so two survivors can't share a strict-normalized
+        # identity here.
         survivors = [b for b in brands if b.id not in merged_away]
         for i, brand_a in enumerate(survivors):
-            norm_a = normalize_brand_name(brand_a.name)
+            norm_a = normalize_brand_name(brand_a.name, strip_weak_suffixes=True)
             for brand_b in survivors[i + 1 :]:
-                norm_b = normalize_brand_name(brand_b.name)
-                if norm_a == norm_b:
-                    continue  # already handled by tier 1 (same normalized group)
+                norm_b = normalize_brand_name(brand_b.name, strip_weak_suffixes=True)
                 ratio = difflib.SequenceMatcher(None, norm_a, norm_b).ratio()
                 if ratio >= DEFAULT_SIMILARITY_THRESHOLD:
                     candidates_flagged += 1

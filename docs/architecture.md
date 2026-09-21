@@ -463,3 +463,30 @@ un'eccezione non gestita catturata al confine dell'agent-run. **113/113
 test totali verdi** (96 + 17), `ruff`/`mypy app tests` puliti, `alembic
 check` senza operazioni pendenti dopo l'applicazione della migration
 (verificata upgrade/downgrade/upgrade reale, non solo `check`).
+
+## Addendum 2026-09-21 (10) — correzione al merge automatico di Milestone 7
+
+Il livello 1 (merge automatico) di `brand_deduplication.py` stripava,
+nella stessa lista, sia suffissi legali lunghi/inequivocabili (Srl, Spa,
+Ltd, GmbH...) sia token corti e ambigui (Co, Sa, Ag, Sl, Nv, Bv) — questi
+ultimi si confondono facilmente con iniziali o parole comuni. "Roma Co" e
+"Roma Corp" (o due brand realmente distinti che terminano entrambi per
+coincidenza in uno di questi due-lettere) sarebbero stati fusi
+automaticamente, senza revisione e senza meccanismo di un-merge.
+
+Corretto separando la lista in `_STRONG_LEGAL_SUFFIXES` (usata sempre, nel
+merge automatico) e `_WEAK_LEGAL_SUFFIXES` (usata solo dal livello 2, che
+non unisce mai automaticamente — `normalize_brand_name()` ora accetta
+`strip_weak_suffixes: bool = False`). Effetto pratico: "Acme Co" e "Acme
+AG" non vengono più uniti automaticamente, ma vengono comunque segnalati
+come `duplicate_candidate` (il livello 2 usa la normalizzazione aggressiva
+proprio perché non ha conseguenze distruttive). Nessuna migration
+necessaria — è un cambiamento di sola logica applicativa, nessuna colonna
+tocca.
+
+**Verifica eseguita**: 3 nuovi test — normalizzazione di default che non
+tocca i suffissi deboli, normalizzazione esplicita che li strippa solo su
+richiesta, e un test end-to-end contro Postgres che verifica "Acme Co"/
+"Acme AG" NON vengono uniti ma vengono segnalati con similarità 1.0.
+**116/116 test totali verdi** (113 + 3), `ruff`/`mypy app tests` puliti,
+`alembic check` senza operazioni pendenti (nessuna modifica di schema).

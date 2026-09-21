@@ -57,6 +57,26 @@ def test_normalize_strips_known_legal_suffix_token():
     assert normalize_brand_name("Acme Kitchenware LLC") == "acme kitchenware"
 
 
+def test_normalize_does_not_strip_weak_suffix_by_default():
+    """Fix: Co/Sa/Ag/Sl/Nv/Bv are too easily confused with initials or
+    ordinary words to strip unattended -- the auto-merge tier's default
+    normalization must leave them alone, unlike the long/unambiguous
+    legal-form markers (Srl, Ltd, GmbH, ...)."""
+    assert normalize_brand_name("Acme Co") == "acme co"
+    assert normalize_brand_name("Acme AG") == "acme ag"
+    assert normalize_brand_name("Acme Co") != normalize_brand_name("Acme")
+
+
+def test_normalize_strips_weak_suffix_only_when_requested():
+    assert normalize_brand_name("Acme Co", strip_weak_suffixes=True) == "acme"
+    assert normalize_brand_name("Acme AG", strip_weak_suffixes=True) == "acme"
+    assert normalize_brand_name("Acme Co", strip_weak_suffixes=True) == normalize_brand_name(
+        "Acme AG", strip_weak_suffixes=True
+    )
+    # Strong suffixes are still stripped either way.
+    assert normalize_brand_name("Acme Srl", strip_weak_suffixes=True) == "acme"
+
+
 def test_normalize_collapses_dotted_acronym_suffix():
     """The bug this module's own docstring example depends on: a
     dot-punctuated Italian legal form must normalize identically to its
@@ -324,6 +344,41 @@ async def test_near_duplicate_is_flagged_not_merged(session: AsyncSession):
     payload = events[0].payload
     assert payload is not None
     assert payload["similarity"] >= DEFAULT_SIMILARITY_THRESHOLD
+
+
+@pytest.mark.asyncio
+async def test_weak_suffix_variants_are_flagged_not_merged(session: AsyncSession):
+    """The fix under test: "Acme Co" and "Acme AG" must NOT be auto-merged
+    (a weak suffix alone is not a safe identity claim), but must still be
+    flagged as a duplicate_candidate (tier 2 strips weak suffixes too, so
+    it still catches the pair) -- neither tier silently drops it."""
+    brand_a = _new_brand("Acme Co", first_seen_days_ago=10)
+    brand_b = _new_brand("Acme AG", first_seen_days_ago=5)
+    session.add_all([brand_a, brand_b])
+    await session.flush()
+
+    summary = await run_brand_deduplication(session)
+
+    assert summary.merged_pairs == []  # NOT auto-merged -- this is the fix
+    assert summary.candidates_flagged == 1
+
+    await session.refresh(brand_a)
+    await session.refresh(brand_b)
+    assert brand_a.status == "ACTIVE"
+    assert brand_b.status == "ACTIVE"
+
+    agent_run = await session.get(AgentRun, summary.agent_run_id)
+    assert agent_run is not None
+    events = (
+        (await session.execute(select(AgentEvent).where(AgentEvent.agent_run_id == agent_run.id)))
+        .scalars()
+        .all()
+    )
+    assert len(events) == 1
+    assert events[0].event_type == "duplicate_candidate"
+    payload = events[0].payload
+    assert payload is not None
+    assert payload["similarity"] == 1.0  # identical once weak suffixes are stripped
 
 
 @pytest.mark.asyncio
