@@ -1,0 +1,15 @@
+{
+  "_comment": "Fixture data for KeepaProvider in MOCK_MODE. Fabricated ASINs/numbers — never real Keepa data. Every ProviderResult built from this file carries is_mock=true.",
+  "B0MOCK0001": {
+    "asin": "B0MOCK0001",
+    "price_history_90d": [42.99, 41.5, 39.99, 39.99, 37.0, 39.99],
+    "bsr_history_90d": [1800, 1650, 1400, 1250, 1300, 1250],
+    "sales_rank_drops_30d": 14
+  },
+  "B0MOCK0002": {
+    "asin": "B0MOCK0002",
+    "price_history_90d": [26.0, 26.0, 24.5, 24.5, 22.99, 24.5],
+    "bsr_history_90d": [600, 550, 480, 430, 410, 430],
+    "sales_rank_drops_30d": 27
+  }
+}

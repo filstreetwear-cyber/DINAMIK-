@@ -25,6 +25,12 @@ class ToolHealthStatus(str, enum.Enum):
     DEGRADED = "DEGRADED"
     RATE_LIMITED = "RATE_LIMITED"
     AUTH_ERROR = "AUTH_ERROR"
+    # Added 2026-09-21 (refactor: Helium10 Optional + Provider/Capability) —
+    # a provider-level "UNAVAILABLE" was never precise enough once a single
+    # provider can support several capabilities with different states.
+    AUTH_REQUIRED = "AUTH_REQUIRED"  # credentials known to be missing/not configured, distinct from AUTH_ERROR (a call was attempted and rejected)
+    REQUIRES_HUMAN = "REQUIRES_HUMAN"  # e.g. a browser session needs a human login/CAPTCHA/MFA step — never bypassed
+    CONFIGURATION_ERROR = "CONFIGURATION_ERROR"  # provider is enabled but misconfigured (bad mode, missing required setting)
 
 
 class EvidenceSourceType(str, enum.Enum):

@@ -178,4 +178,26 @@ Milestone 1 e 2 completate e verificate (vedi `docs/database.md`). Prima dell'in
 Stato fasi:
 - **Phase A** (audit) — completata.
 - **Phase B** (database: colonne additive su `evidence`/`tool_calls`, tabelle `browser_sessions`/`browser_tasks`) — completata e verificata, vedi `docs/database.md` addendum.
-- **Phase C** (Capability/Provider/Registry/Orchestrator + Website/Amazon/Keepa provider, mock-first) — prossima, in attesa di conferma per procedere. Non includerà codice specifico Helium10 (nessun file in `app/tools/helium10/`) finché i punti 1-2 sopra non sono sbloccati.
+- **Phase C** (Capability/Provider/Registry/Orchestrator + Website/Amazon/Keepa provider, mock-first) — **completata**, vedi addendum sotto. Nessun codice specifico Helium10 (nessun file in `app/tools/helium10/`), come da decisione.
+
+---
+
+## Addendum 2026-09-21 (2) — Refactor Phase C: Capability/Provider/Registry/Orchestrator
+
+Costruito in `app/tools/core/`:
+
+- `capability.py` — ri-esporta `Capability` da `app.models.enums` (non una seconda definizione: deve restare la stessa cosa che finisce in `ToolCall.capability`, Phase B).
+- `provider.py` — `IntelligenceProvider` (ABC), `ProviderResult` (il dato prodotto — mappa quasi 1:1 su una riga Evidence), gerarchia di eccezioni (`ProviderUnavailableError`, `ProviderAuthError`, `ProviderNotConfiguredError`, `ProviderRateLimitedError`, `ProviderRequiresHumanError`) che l'Orchestrator usa per decidere il fallback.
+- `registry.py` — `ProviderRegistry`: registrazione con priorità esplicita, lookup per capability ordinato. La priorità è passata a mano alla registrazione (non letta da config) perché la ristrutturazione di `config.py` per priorità/mode/cost_model per-provider (REQUIRED CHANGES #1 dell'audit) resta un lavoro aperto, separato da questa fase.
+- `orchestrator.py` — `IntelligenceSourceOrchestrator`: prova i provider in ordine di priorità per una capability, cade sul successivo solo per un `ProviderError` (mai per un bug generico, che deve propagare), registra l'intero percorso di tentativi (`attempts`).
+
+Due provider reali collegati:
+
+- **`app/tools/website/`** (`http_client.py`, `html_parser.py`, `provider.py`) — **l'unico provider con dati reali** oggi: nessuna credenziale terza parte, fetch HTTP + parsing con BeautifulSoup/lxml, rileva tecnologia (Shopify/WooCommerce/Magento/WordPress), presenza di widget di chat, titolo/meta description. Segnali euristici (tecnologia, chatbot) marcati `DataType.INFERENCE`, mai FACT; titolo/meta letti direttamente dal markup marcati FACT.
+- **`app/tools/amazon/provider.py`**, **`app/tools/keepa/provider.py`** — mock-only (nessuna credenziale confermata), dati da fixture in `fixtures/`. Ogni risultato porta `is_mock=True` — un campo nuovo su `ProviderResult`, separato da `data_type`, così un dato fixture non può mai essere scambiato per un'osservazione reale a bassa confidenza. Rifiutano di rispondere fuori da `MOCK_MODE` (`ProviderNotConfiguredError`), invece di restituire silenziosamente dati finti.
+
+`ToolHealthStatus` esteso con `AUTH_REQUIRED`, `REQUIRES_HUMAN`, `CONFIGURATION_ERROR` (additivo, stessa logica string+enum di sempre).
+
+**Verifica eseguita**: 27 nuovi test (registry, orchestrator fallback — incluso il caso esplicito "un bug reale in un provider non deve essere trattato come fallback", provider Website con HTML fisso via fixture e failure path, provider Amazon/Keepa mock), tutti verdi; i 14 test di Milestone 1/2/Phase B invariati e ancora verdi — 41/41, zero regressioni; `ruff` e `mypy app tests` puliti.
+
+**Limite onesto, non nascosto**: ho provato a verificare `WebsiteIntelligenceProvider` anche contro un sito reale (sellerfast.tech ed example.com), non solo con HTML fisso in test. Il sandbox in cui giro nega la connessione in uscita verso domini generici a livello di gateway (403 alla CONNECT, verificato via `__agentproxy/status` — non è il sito che blocca, è la policy di rete di questo ambiente). Il percorso di fetch HTTP è quindi verificato fino al livello "parsing + gestione errori", non end-to-end contro internet reale da qui — quella verifica va fatta dove il sistema girerà davvero (la VPS che Frank ha già assegnato al progetto).
