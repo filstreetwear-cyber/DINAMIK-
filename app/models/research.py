@@ -8,7 +8,7 @@ from sqlalchemy import DateTime, ForeignKey, Integer, String
 from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
-from app.models.base import Base, TimestampMixin, UUIDPrimaryKeyMixin
+from app.models.base import Base, TimestampMixin, UUIDPrimaryKeyMixin, utcnow
 from app.models.enums import ResearchJobStatus
 
 
@@ -22,7 +22,15 @@ class ResearchJob(UUIDPrimaryKeyMixin, Base):
     keywords: Mapped[list | None] = mapped_column(JSONB, nullable=True)
     status: Mapped[str] = mapped_column(String(20), default=ResearchJobStatus.PENDING.value)
     priority: Mapped[int] = mapped_column(Integer, default=0)
-    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
+    # 2026-09-21 (Milestone 5 fix): every other model in this codebase gets
+    # created_at either from TimestampMixin or CreatedAtMixin, both of
+    # which set default=utcnow. This one was hand-rolled and the default
+    # was missing — harmless as long as every caller remembered to set it
+    # manually, which is exactly the kind of thing that stops being true
+    # once ResearchJob rows start getting created programmatically
+    # (app/agents/amazon_scout/discovery.py). No migration needed: this is
+    # a Python-side default, the column's DB shape is unchanged.
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
     started_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     completed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     error: Mapped[str | None] = mapped_column(String, nullable=True)

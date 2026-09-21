@@ -80,6 +80,47 @@ async def test_keepa_provider_refuses_outside_mock_mode(monkeypatch: pytest.Monk
 
 
 @pytest.mark.asyncio
+async def test_amazon_provider_product_search_filters_by_category_and_marketplace(
+    monkeypatch: pytest.MonkeyPatch,
+):
+    provider = AmazonProvider(settings=_mock_settings(monkeypatch))
+
+    results = await provider.fetch(
+        Capability.PRODUCT_SEARCH, category="Casa e cucina", marketplace="IT"
+    )
+
+    assert len(results) == 1
+    assert results[0].is_mock is True
+    assert set(results[0].data["asins"]) == {"B0MOCK0001", "B0MOCK0002"}
+
+
+@pytest.mark.asyncio
+async def test_amazon_provider_product_search_with_no_matches_returns_empty_asin_list(
+    monkeypatch: pytest.MonkeyPatch,
+):
+    """Empty ASINs is a real, substantive search result (nothing in that
+    category), not the "unknown entity" case the per-ASIN lookups use —
+    so this still returns one ProviderResult, not []."""
+    provider = AmazonProvider(settings=_mock_settings(monkeypatch))
+
+    results = await provider.fetch(Capability.PRODUCT_SEARCH, category="Elettronica")
+
+    assert len(results) == 1
+    assert results[0].data["asins"] == []
+
+
+@pytest.mark.asyncio
+async def test_amazon_provider_product_search_with_no_filters_returns_everything(
+    monkeypatch: pytest.MonkeyPatch,
+):
+    provider = AmazonProvider(settings=_mock_settings(monkeypatch))
+
+    results = await provider.fetch(Capability.PRODUCT_SEARCH)
+
+    assert set(results[0].data["asins"]) == {"B0MOCK0001", "B0MOCK0002"}
+
+
+@pytest.mark.asyncio
 async def test_amazon_and_keepa_both_serve_the_same_asin_for_overlapping_capability(
     monkeypatch: pytest.MonkeyPatch,
 ):

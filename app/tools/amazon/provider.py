@@ -3,10 +3,15 @@ AmazonProvider — mock-only today. No real Amazon discovery integration
 exists: SP-API is account-scoped (useless for prospect discovery, see
 docs/architecture.md section 0) and PA-API is Associates-gated. This
 provider exists so the Capability/Orchestrator layer has something real to
-route PRODUCT_DATA/PRODUCT_PRICE/SALES_RANK/SELLER_DATA/BRAND_DATA to in
-MOCK_MODE, and so a real scraping/API integration can be dropped in later
-by replacing this file's `fetch()` body without touching the orchestrator,
-the registry, or anything upstream.
+route PRODUCT_SEARCH/PRODUCT_DATA/PRODUCT_PRICE/SALES_RANK/SELLER_DATA/BRAND_DATA
+to in MOCK_MODE, and so a real scraping/API integration can be dropped in
+later by replacing this file's `fetch()` body without touching the
+orchestrator, the registry, or anything upstream.
+
+PRODUCT_SEARCH added 2026-09-21 for Milestone 5 (Amazon Scout discovery) —
+see `_search()` below and `Capability.PRODUCT_SEARCH`'s docstring
+(app/models/enums.py) for why this needed a new capability rather than
+reusing an existing one.
 
 health() deliberately returns CONFIGURATION_ERROR outside MOCK_MODE, not
 UNAVAILABLE — UNAVAILABLE implies "this is wired up and currently down";
@@ -33,6 +38,7 @@ _FIXTURE_PATH = Path(__file__).resolve().parents[3] / "fixtures" / "amazon_mock_
 
 _SUPPORTED = frozenset(
     {
+        Capability.PRODUCT_SEARCH,
         Capability.PRODUCT_DATA,
         Capability.PRODUCT_PRICE,
         Capability.SALES_RANK,
@@ -68,6 +74,9 @@ class AmazonProvider(IntelligenceProvider):
                 self.name, "no real Amazon discovery integration is configured yet"
             )
 
+        if capability is Capability.PRODUCT_SEARCH:
+            return self._search(params)
+
         asin = params.get("asin")
         if not asin:
             raise ProviderUnavailableError(self.name, "fetch() requires an 'asin' parameter")
@@ -102,6 +111,47 @@ class AmazonProvider(IntelligenceProvider):
                 confidence=100.0,
                 acquisition_method=AcquisitionMethod.IMPORT,
                 observed_at=observed_at,
+                is_mock=True,
+            )
+        ]
+
+    def _search(self, params: dict[str, Any]) -> list[ProviderResult]:
+        """Milestone 5 discovery entry point: category/marketplace IN,
+        candidate ASINs OUT — the one capability here that goes the
+        opposite direction of every other lookup in this file.
+
+        `keywords` is accepted (so a caller matching the refactor doc's
+        param shape doesn't get a TypeError) but not matched against
+        anything: the fixture has no free-text fields worth searching, and
+        pretending it does would fabricate a capability this mock doesn't
+        actually have. category/marketplace are real filters against the
+        fixture's own fields.
+
+        Unlike the per-ASIN lookups above, an empty match list is still a
+        real, substantive answer ("search ran, found nothing for this
+        category") — not "we don't know this entity" — so this always
+        returns one ProviderResult, never `[]`.
+        """
+        fixtures = _load_fixtures()
+        category = params.get("category")
+        marketplace = params.get("marketplace")
+
+        matches = [
+            product
+            for product in fixtures.values()
+            if (category is None or product["category"] == category)
+            and (marketplace is None or product["marketplace"] == marketplace)
+        ]
+        asins = [product["asin"] for product in matches]
+
+        return [
+            ProviderResult(
+                capability=Capability.PRODUCT_SEARCH,
+                data={"asins": asins},
+                data_type=DataType.FACT,
+                confidence=100.0,
+                acquisition_method=AcquisitionMethod.IMPORT,
+                observed_at=datetime.now(UTC),
                 is_mock=True,
             )
         ]

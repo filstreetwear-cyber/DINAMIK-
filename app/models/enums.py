@@ -103,6 +103,13 @@ class Capability(str, enum.Enum):
     (refactor doc, sections 2-13). The orchestrator routes on this, never
     on a hardcoded provider name."""
 
+    # Added 2026-09-21 for Milestone 5 (Amazon Scout discovery): every
+    # other capability here is a per-ASIN lookup, but discovery needs to
+    # go the other direction — category/keyword IN, candidate ASINs OUT.
+    # No real Amazon/Keepa/Jungle Scout API gives Dinamik open product
+    # search today (see docs/architecture.md section 0) — this stays
+    # mock-only until a real search-capable provider is confirmed.
+    PRODUCT_SEARCH = "PRODUCT_SEARCH"
     PRODUCT_DATA = "PRODUCT_DATA"
     PRODUCT_PRICE = "PRODUCT_PRICE"
     PRICE_HISTORY = "PRICE_HISTORY"

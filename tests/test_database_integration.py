@@ -26,6 +26,7 @@ from app.models import (
     BrowserTask,
     Company,
     Evidence,
+    ResearchJob,
     ToolCall,
 )
 
@@ -175,3 +176,18 @@ async def test_browser_session_and_task_round_trip(session: AsyncSession):
     assert fetched.requires_human is True
     assert fetched.browser_session_id == browser_session.id
     assert fetched.tool_call_id == tool_call.id
+
+
+@pytest.mark.asyncio
+async def test_research_job_created_at_gets_a_default(session: AsyncSession):
+    """2026-09-21 fix (Milestone 5): unlike every other model, ResearchJob's
+    created_at was hand-rolled without default=utcnow — it worked only as
+    long as every caller remembered to set it manually. Constructing one
+    without passing created_at must not raise NOT NULL and must produce a
+    real, recent timestamp."""
+    job = ResearchJob(name="created_at default check", marketplace="IT")
+    session.add(job)
+    await session.flush()
+
+    assert job.created_at is not None
+    assert (datetime.now(UTC) - job.created_at).total_seconds() < 30
