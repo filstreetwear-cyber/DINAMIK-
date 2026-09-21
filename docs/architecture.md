@@ -875,3 +875,60 @@ evidenza. **203 test totali (201 passati, 2 saltati per lo stesso motivo
 di rete)**, `ruff check .`/`mypy app/` puliti, `alembic check` senza
 operazioni pendenti (nessuna modifica di schema — questa milestone è pura
 orchestrazione, nessuna tabella nuova).
+
+## Addendum (17) — 21/09: Milestone 12 — CLI
+
+L'unica milestone finora con uno scope non ambiguo anche senza una spec
+di Fil: `pyproject.toml` dichiarava già `dinamik = "app.cli:app"` da
+Milestone 1, e `typer>=0.12` era già una dipendenza — entrambi inutilizzati
+fino ad ora. Prima di questa milestone, l'unico modo di eseguire
+davvero qualcosa in questo sistema (discovery, resolution, dedup,
+opportunity, scoring, AI analysis, o la pipeline di Milestone 11) era
+scrivere uno script usa-e-getta o un test — `make run-worker` non
+funziona ancora (Milestone 14) e non esiste un'API (Milestone 13).
+
+**Costruito**: `app/cli.py`, quattro comandi — `health` (config + DB reale
++ stato AI reale), `pipeline run` (crea un `ResearchJob` ed esegue
+`run_research_pipeline` di Milestone 11 per intero, **committando** — il
+primo comando in questo codebase che possiede davvero il confine della
+transazione, dato che ogni fase sottostante lo delega esplicitamente al
+chiamante), `jobs list` e `brands list` (ispezione read-only, altrimenti
+un `pipeline run` non lascerebbe modo di vedere cosa è successo senza
+interrogare Postgres a mano).
+
+**Bug reale trovato e corretto scrivendo i test**: i comandi inizialmente
+riusavano l'`engine`/`SessionLocal` di `app/database/session.py` (pensati
+per un unico event loop di lunga durata, quello di FastAPI). Un comando
+CLI invece fa il proprio `asyncio.run()` per invocazione — un `engine`
+condiviso tra più chiamate `asyncio.run()` nello stesso processo rompe le
+connessioni asyncpg già aperte quando il primo event loop si chiude
+("RuntimeError: Event loop is closed"). Emerso scrivendo
+`tests/test_cli.py` (che invoca più comandi nello stesso processo via
+`CliRunner` — esattamente lo scenario che lo espone; un utente reale che
+lancia comandi separati da shell non lo incontrerebbe, ma uno script che
+importa `app.cli` e chiama più comandi sì). Corretto: ogni funzione
+`_*_async` ora crea e smaltisce il proprio `engine` a vita breve, stesso
+pattern che ogni file di test di questo progetto già usa.
+
+**Secondo problema reale, trovato eseguendo il comando per davvero
+(non solo nei test)**: un mio smoke test manuale (`dinamik pipeline run`)
+ha committato righe reali nel DB di sviluppo condiviso con la test suite,
+rompendo 17 test che fanno query non filtrate assumendo tabelle altrimenti
+vuote. Ripulito a mano con DELETE mirate per id (non un TRUNCATE globale).
+Lezione applicata a `tests/test_cli.py`: una fixture `autouse` pulisce
+esplicitamente OGNI tabella un comando CLI può aver scritto — inclusa
+`errors`, dimenticata alla prima stesura e scoperta perché
+`ai_analysis_engine` scrive righe `AI_ERROR` reali ogni volta che gira
+qui (Ollama non raggiungibile in questo sandbox, stesso motivo di
+Milestone 9.5) — la suite intera è stata rieseguita due volte di seguito
+per confermare che il DB torna pulito, non solo che i singoli test
+passano.
+
+**Verifica eseguita**: 6 nuovi test (Postgres reale, `CliRunner` di Typer,
+invocazione reale dei quattro comandi — non un mock del layer CLI),
+eseguito anche a mano da terminale (`dinamik health`, `dinamik pipeline
+run`, `dinamik jobs list`, `dinamik brands list`) contro Postgres reale
+in mock mode, con pulizia esplicita dei dati di test. **209 test totali
+(207 passati, 2 saltati per lo stesso motivo di rete)**, `ruff check
+.`/`mypy app/` puliti, `alembic check` senza operazioni pendenti (nessuna
+modifica di schema).
