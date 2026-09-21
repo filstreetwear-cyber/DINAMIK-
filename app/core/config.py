@@ -19,8 +19,10 @@ from pathlib import Path
 from typing import Any
 
 import yaml
-from pydantic import Field
+from pydantic import BaseModel, Field
 from pydantic_settings import BaseSettings, SettingsConfigDict
+
+from app.models.enums import ProviderMode
 
 CONFIG_DIR = Path(__file__).resolve().parents[2] / "config"
 
@@ -41,6 +43,21 @@ def _load_yaml(name: str) -> dict[str, Any]:
         return {}
     with path.open("r", encoding="utf-8") as f:
         return yaml.safe_load(f) or {}
+
+
+class ProviderConfig(BaseModel):
+    """One entry of config/default.yaml's `providers:` section (Phase H,
+    refactor 21/09) — REQUIRED CHANGES #1 from the original audit, closed
+    here. `mode` is validated but not yet read by any provider (see
+    ProviderMode's docstring). `cost_model` is a coarse tier string
+    (free/mock/cheap/paid/unknown), not a currency amount — see
+    app/tools/core/registry.py's cost_rank() for how it's used."""
+
+    name: str
+    enabled: bool = True
+    mode: ProviderMode = ProviderMode.API
+    priority: int = 100
+    cost_model: str = "unknown"
 
 
 def _deep_merge(base: dict, override: dict) -> dict:
@@ -138,6 +155,24 @@ class Settings(BaseSettings):
 
     def score_weights(self) -> dict[str, float]:
         return dict(self.yaml_config.get("scoring", {}).get("weights", {}))
+
+    def provider_configs(self) -> dict[str, ProviderConfig]:
+        """Every entry under config/default.yaml's `providers:` section
+        (deep-merged with the environment override, same as everything
+        else in yaml_config)."""
+        raw = self.yaml_config.get("providers", {})
+        return {name: ProviderConfig(name=name, **cfg) for name, cfg in raw.items()}
+
+    def provider_config(self, name: str) -> ProviderConfig:
+        """Raises KeyError for a provider with no entry in `providers:` —
+        deliberately not silently defaulting, since a missing entry means
+        the registry has nothing to base priority/cost ordering on, which
+        should be caught at wiring time, not produce a mysteriously
+        low-priority provider."""
+        configs = self.provider_configs()
+        if name not in configs:
+            raise KeyError(f"no provider config for '{name}' in config/default.yaml providers: section")
+        return configs[name]
 
 
 @lru_cache

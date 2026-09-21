@@ -149,3 +149,16 @@ class BrowserSessionStatus(str, enum.Enum):
     EXPIRED = "EXPIRED"
     REQUIRES_LOGIN = "REQUIRES_LOGIN"
     REVOKED = "REVOKED"
+
+
+class ProviderMode(str, enum.Enum):
+    """Per-provider acquisition mode, config/default.yaml `providers:`
+    section (Phase H). Validated today; not yet consumed by any provider's
+    logic — reserved for Phase G, when a single provider name (Helium10)
+    needs to pick between API/BROWSER/MANUAL implementations from config
+    rather than the caller hardcoding which class to instantiate."""
+
+    API = "api"
+    BROWSER = "browser"
+    MANUAL = "manual"
+    DISABLED = "disabled"

@@ -1,6 +1,6 @@
 # Dinamik Advisor — Amazon Intelligence Platform
 
-**Stato attuale: Milestone 1+2 completate. Refactor "Helium10 Optional + Provider/Capability" — Phase A (audit), B (database), C (Capability/Provider/Registry/Orchestrator), D (Amazon/Keepa provider), E (Website: HTTP + HTML + JS/Browser fallback) e F (Browser Automation Engine, Playwright, verificato reale) completate. Phase G (Helium10) sospesa su tua decisione. Vedi `docs/architecture.md` (addendum 21/09) e `docs/refactor-audit-2026-09-21.md`.**
+**Stato attuale: Milestone 1+2 completate. Refactor "Helium10 Optional + Provider/Capability" — Phase A (audit), B (database), C (Capability/Provider/Registry/Orchestrator), D (Amazon/Keepa provider), E (Website: HTTP + HTML + JS/Browser fallback), F (Browser Automation Engine, Playwright, verificato reale) e H (Orchestrator: cost awareness, confidence, availability) completate. Phase G (Helium10) sospesa su tua decisione; Phase I (Amazon Scout) è di fatto la Milestone 5, non un refactor — vedi nota in `docs/architecture.md`. Vedi `docs/architecture.md` (addendum 21/09) e `docs/refactor-audit-2026-09-21.md`.**
 
 Piattaforma proprietaria di Dinamik Advisor per l'individuazione, analisi e
 qualificazione di brand/seller Amazon con margine di crescita commerciale.

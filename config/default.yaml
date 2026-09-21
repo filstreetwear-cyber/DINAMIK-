@@ -70,3 +70,43 @@ cache:
 
 data_freshness:
   stale_after_days: 14
+
+# Phase H (refactor 21/09): per-provider config the ProviderRegistry uses
+# to order/fallback providers, instead of priority being hardcoded at
+# registration call sites. `mode` is validated but not yet consumed by any
+# provider — reserved for Phase G, when Helium10Provider variants
+# (api/browser/manual) exist and need to pick one from config. `cost_model`
+# is a coarse tier (free < mock < cheap < paid), not a real currency
+# amount — nobody has real per-call pricing yet; see
+# app/tools/core/registry.py for the ranking and its rationale.
+providers:
+  website_intelligence:
+    enabled: true
+    mode: api  # "api" here means "the provider's own acquisition logic", not literally a REST API — see provider.py
+    priority: 10
+    cost_model: free
+  amazon:
+    enabled: true
+    mode: api
+    priority: 20
+    cost_model: mock
+  keepa:
+    enabled: true
+    mode: api
+    priority: 30
+    cost_model: mock
+  junglescout:
+    enabled: false
+    mode: disabled
+    priority: 90
+    cost_model: unknown
+  perpetua:
+    enabled: false
+    mode: disabled
+    priority: 90
+    cost_model: unknown
+  helium10:
+    enabled: false
+    mode: disabled  # sospeso — vedi docs/architecture.md addendum 21/09
+    priority: 100
+    cost_model: unknown

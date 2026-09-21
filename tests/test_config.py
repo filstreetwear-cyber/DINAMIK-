@@ -1,7 +1,10 @@
 """Milestone 1 smoke tests: configuration loads, merges and behaves as specified."""
 from __future__ import annotations
 
+import pytest
+
 from app.core.config import ToolAvailability, get_settings
+from app.models.enums import ProviderMode
 
 
 def _fresh_settings():
@@ -71,3 +74,26 @@ def test_amazon_spapi_status_is_independent_of_discovery_tools(monkeypatch):
     monkeypatch.delenv("AMAZON_API_SECRET", raising=False)
     settings = _fresh_settings()
     assert settings.tool_status("amazon_spapi") == ToolAvailability.UNAVAILABLE
+
+
+def test_provider_configs_parses_the_full_providers_section(monkeypatch):
+    settings = _fresh_settings()
+    configs = settings.provider_configs()
+
+    assert configs["website_intelligence"].priority == 10
+    assert configs["website_intelligence"].cost_model == "free"
+    assert configs["amazon"].priority == 20
+    assert configs["amazon"].cost_model == "mock"
+    assert configs["helium10"].enabled is False
+    assert configs["helium10"].mode == ProviderMode.DISABLED
+
+
+def test_provider_config_raises_for_unknown_provider(monkeypatch):
+    settings = _fresh_settings()
+    with pytest.raises(KeyError):
+        settings.provider_config("not_a_real_provider")
+
+
+def test_provider_config_single_lookup_matches_provider_configs(monkeypatch):
+    settings = _fresh_settings()
+    assert settings.provider_config("keepa") == settings.provider_configs()["keepa"]

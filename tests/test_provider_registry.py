@@ -13,7 +13,7 @@ import pytest
 from app.models.enums import AcquisitionMethod, DataType, ToolHealthStatus
 from app.tools.core.capability import Capability
 from app.tools.core.provider import IntelligenceProvider, ProviderResult
-from app.tools.core.registry import ProviderRegistry
+from app.tools.core.registry import ProviderRegistry, cost_rank
 
 
 class _FakeProvider(IntelligenceProvider):
@@ -82,3 +82,50 @@ async def test_fake_provider_fetch_smoke():
     provider = _FakeProvider("smoke", frozenset({Capability.WEBSITE_DATA}))
     results = await provider.fetch(Capability.WEBSITE_DATA)
     assert results[0].data == {"provider": "smoke"}
+
+
+# --- Phase H: cost-aware ordering -------------------------------------------
+
+
+def test_cost_rank_orders_known_tiers_free_to_paid():
+    assert cost_rank("free") < cost_rank("mock") < cost_rank("cheap") < cost_rank("paid")
+
+
+def test_cost_rank_treats_unknown_as_worst_case():
+    assert cost_rank("unknown") == cost_rank("something_not_in_the_table")
+    assert cost_rank("unknown") > cost_rank("paid")
+
+
+def test_for_capability_breaks_priority_ties_by_cost():
+    registry = ProviderRegistry()
+    registry.register(
+        _FakeProvider("expensive", frozenset({Capability.PRODUCT_DATA})), priority=50, cost_model="paid"
+    )
+    registry.register(
+        _FakeProvider("cheap", frozenset({Capability.PRODUCT_DATA})), priority=50, cost_model="free"
+    )
+
+    ordered = registry.for_capability(Capability.PRODUCT_DATA)
+
+    assert [p.name for p in ordered] == ["cheap", "expensive"]
+
+
+def test_priority_still_wins_over_cost_when_they_disagree():
+    """priority is the operator's explicit choice — cost only breaks ties
+    between EQUAL priorities, it never overrides a deliberate priority
+    ordering."""
+    registry = ProviderRegistry()
+    registry.register(
+        _FakeProvider("cheap_but_low_priority", frozenset({Capability.PRODUCT_DATA})),
+        priority=100,
+        cost_model="free",
+    )
+    registry.register(
+        _FakeProvider("expensive_but_high_priority", frozenset({Capability.PRODUCT_DATA})),
+        priority=1,
+        cost_model="paid",
+    )
+
+    ordered = registry.for_capability(Capability.PRODUCT_DATA)
+
+    assert [p.name for p in ordered] == ["expensive_but_high_priority", "cheap_but_low_priority"]
