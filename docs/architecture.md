@@ -629,3 +629,61 @@ riferimenti per-argomento come `docs/tools.md`/`docs/providers.md`):
 tutto il progetto. Nessuna modifica di schema in questa fase (Agent
 Registry e Data Contracts sono puro Python, nessuna tabella nuova) — nessun
 `alembic check` necessario.
+
+### (13) Milestone 9 — Scoring engine (21/09)
+
+`app/services/scoring_engine.py` — deterministico, no AI (Milestone 10,
+non iniziata — "AI signals validati" nel docstring di `Score` è quello che
+QUELLA milestone aggiunge sopra questa, non qualcosa che fa questa).
+**Consuma** le righe `Opportunity` già scritte da `opportunity_engine.py`
+(Milestone 8) invece di ricalcolare i segnali da `AmazonProduct`/
+`AmazonSeller` — un'unica fonte di verità per "cosa abbiamo concluso su
+questo brand", non una seconda copia della logica di business destinata a
+divergere dalla prima.
+
+Decisioni deliberate, non arbitrarie:
+
+- **Mappa livello→punteggio volutamente grezza** (NONE=0, LOW=25,
+  POSSIBLE=40, MEDIUM=60, HIGH=90): esiste per poter pesare/confrontare
+  dimensioni diverse con `config/default.yaml`'s `scoring.weights`, non
+  perché "MEDIUM=60.0" sia una stima calibrata di valore reale — non ci
+  sono ancora dati di esito (un brand HIGH ha davvero convertito?) per
+  calibrarla meglio.
+- **Confidenza a due livelli, onestamente limitata**: `85.0` se
+  l'`Opportunity` sottostante veniva da dati rating/review reali, `30.0`
+  se da `"insufficient_product_data"` (l'unico fattore di
+  `scoring.confidence.decrease_on` che questo layer può verificare
+  deterministicamente oggi). **Non riflette mock-vs-reale**
+  (`ProviderResult.is_mock` non viene mai persistito su `AmazonProduct` —
+  gap reale, annotato esplicitamente nel modulo invece di essere
+  nascosto) — gli altri fattori di `increase_on`/`decrease_on`
+  (`multiple_sources_agree`, `ai_inference`, ...) richiedono
+  cross-referenziazione multi-provider o l'AI layer, nessuno dei due
+  esiste ancora.
+- **`evidence_ids` tracciati attraverso `ResearchResult`, non inventati**:
+  `Evidence` è scritta contro `entity_type="research_result"`, non contro
+  un brand direttamente — questo modulo segue `ResearchResult.brand_id`
+  (Milestone 6) per trovare quali research result sono stati risolti su
+  quel brand, poi colleziona le `Evidence` attaccate a quelli. Una catena
+  reale e interrogabile, non una supposizione.
+- **Nessun punteggio composito/aggregato persistito** — la somma pesata
+  tra dimensioni è calcolabile a domanda da un futuro consumer
+  (CLI/API, Milestone 12/13) dai `Score` per-dimensione già persistiti
+  più i pesi già in config: persistere anche l'aggregato sarebbe stato
+  stato derivato da tenere sincronizzato, non nuova informazione.
+- Stesso pattern append-only di `Opportunity` (nessun vincolo unique su
+  `(brand_id, score_type)`, confermato nel modello) — rieseguire scrive
+  righe nuove.
+- Solo i due `OpportunityType` che `opportunity_engine.py` implementa
+  davvero ricevono una riga `Score` — gli altri quattro non hanno righe
+  `Opportunity` da leggere, quindi nulla viene inventato per loro.
+
+**Verifica eseguita**: 13 nuovi test (tutti contro Postgres reale — questo
+modulo è interamente logica di lettura/scrittura DB, niente da testare in
+isolamento puro) — collassamento sull'`Opportunity` più recente per tipo,
+tracciamento `evidence_ids`, `weight_used` contro i pesi reali di config,
+i due livelli di confidenza, esclusione brand `MERGED`, natura
+append-only, cap `max_brands`, eccezione non gestita catturata. **167/167
+test totali verdi**, `ruff check .`/`mypy app/` puliti, `alembic check`
+senza operazioni pendenti (nessuna modifica di schema — `Score` esiste già
+dalla Milestone 2).
