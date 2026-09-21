@@ -9,6 +9,7 @@ from app.models.agent_run import AgentEvent, AgentRun, ErrorLog, ToolCall
 from app.models.amazon import AmazonListing, AmazonProduct, AmazonSeller
 from app.models.auditor_package import AuditorPackage
 from app.models.base import Base
+from app.models.browser import BrowserSession, BrowserTask
 from app.models.company import Brand, Company
 from app.models.contact import Contact, ProspectStatus
 from app.models.evidence import Evidence
@@ -27,6 +28,8 @@ __all__ = [
     "AuditorPackage",
     "Base",
     "Brand",
+    "BrowserSession",
+    "BrowserTask",
     "Category",
     "Company",
     "Competitor",

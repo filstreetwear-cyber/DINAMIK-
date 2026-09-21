@@ -8,6 +8,7 @@ test:
 
 lint:
 	ruff check .
+	mypy app tests
 
 format:
 	ruff format .

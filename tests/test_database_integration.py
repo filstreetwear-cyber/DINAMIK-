@@ -19,7 +19,15 @@ from sqlalchemy.exc import IntegrityError, OperationalError
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
 
 from app.core.config import get_settings
-from app.models import AmazonProduct, Brand, Company
+from app.models import (
+    AmazonProduct,
+    Brand,
+    BrowserSession,
+    BrowserTask,
+    Company,
+    Evidence,
+    ToolCall,
+)
 
 
 async def _make_engine():
@@ -59,6 +67,7 @@ async def test_company_brand_relationship_round_trip(session: AsyncSession):
 
     fetched = (await session.execute(select(Brand).where(Brand.id == brand.id))).scalar_one()
     assert fetched.company_id == company.id
+    assert fetched.company is not None
     assert fetched.company.legal_name == "Test Co Srl"
 
 
@@ -95,3 +104,74 @@ async def test_same_asin_different_marketplace_is_allowed(session: AsyncSession)
         )
     )
     await session.flush()  # must NOT raise
+
+
+@pytest.mark.asyncio
+async def test_evidence_and_tool_call_accept_provider_and_acquisition_method(session: AsyncSession):
+    """Refactor 2026-09-21: the new nullable columns round-trip, and rows written
+    before this migration (provider/acquisition_method = NULL) remain valid —
+    the columns are additive, not backfilled."""
+    now = datetime.now(UTC)
+    evidence_with_provenance = Evidence(
+        entity_type="brand",
+        entity_id="00000000-0000-0000-0000-000000000001",
+        claim="Website runs on Shopify",
+        data_type="FACT",
+        source="website_intelligence",
+        source_type="WEBSITE",
+        confidence=95.0,
+        observed_at=now,
+        provider="website_intelligence",
+        acquisition_method="HTTP",
+    )
+    evidence_legacy_shape = Evidence(
+        entity_type="brand",
+        entity_id="00000000-0000-0000-0000-000000000002",
+        claim="Pre-refactor row, no provenance columns set",
+        data_type="FACT",
+        source="amazon",
+        source_type="AMAZON",
+        confidence=90.0,
+        observed_at=now,
+    )
+    session.add_all([evidence_with_provenance, evidence_legacy_shape])
+    await session.flush()
+
+    assert evidence_with_provenance.provider == "website_intelligence"
+    assert evidence_legacy_shape.provider is None
+    assert evidence_legacy_shape.acquisition_method is None
+
+
+@pytest.mark.asyncio
+async def test_browser_session_and_task_round_trip(session: AsyncSession):
+    """New tables from the refactor: a session (persistent login state) and a
+    task that references it, plus the WAITING_FOR_HUMAN status the spec
+    requires as a first-class state, not a bypassed edge case."""
+    tool_call = ToolCall(tool_name="helium10_dashboard", status="PENDING", provider="helium10")
+    session.add(tool_call)
+    await session.flush()
+
+    browser_session = BrowserSession(
+        provider="helium10",
+        account_label="dinamik-advisor-basic",
+        status="REQUIRES_LOGIN",
+    )
+    session.add(browser_session)
+    await session.flush()
+
+    task = BrowserTask(
+        browser_session_id=browser_session.id,
+        tool_call_id=tool_call.id,
+        provider="helium10",
+        task_type="login",
+        status="WAITING_FOR_HUMAN",
+        requires_human=True,
+    )
+    session.add(task)
+    await session.flush()
+
+    fetched = (await session.execute(select(BrowserTask).where(BrowserTask.id == task.id))).scalar_one()
+    assert fetched.status == "WAITING_FOR_HUMAN"
+    assert fetched.requires_human is True
+    assert fetched.browser_session_id == browser_session.id
+    assert fetched.tool_call_id == tool_call.id

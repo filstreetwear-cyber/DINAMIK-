@@ -1,6 +1,6 @@
 # Dinamik Advisor — Amazon Intelligence Platform
 
-**Stato attuale: Milestone 2 completata — database e migrations, su PostgreSQL reale.**
+**Stato attuale: Milestone 1+2 completate. Refactor "Helium10 Optional + Provider/Capability" in corso — Phase A (audit) e Phase B (database) completate, Phase C (astrazione Capability/Provider/Orchestrator) in attesa di conferma. Vedi `docs/architecture.md` (addendum 21/09) e `docs/refactor-audit-2026-09-21.md`.**
 
 Piattaforma proprietaria di Dinamik Advisor per l'individuazione, analisi e
 qualificazione di brand/seller Amazon con margine di crescita commerciale.
@@ -45,10 +45,13 @@ credenziale reale — i connector mock arrivano in Milestone 4.
 | Connector | Uso | Note |
 |---|---|---|
 | Amazon SP-API | non usato dall'Amazon Scout | account-scoped, rilevante da Agent 02 in poi |
-| Keepa | discovery | non disponibile per Dinamik — deprioritizzato |
-| Jungle Scout | discovery | non disponibile per Dinamik — deprioritizzato |
-| Perpetua (ex-Sellics) | discovery | non disponibile per Dinamik — deprioritizzato |
-| **Helium 10** | discovery | **confermato come unico tool disponibile (21/09) — connector prioritario.** Resta da verificare se il piano include l'API Enterprise o solo l'accesso da dashboard |
+| Keepa | discovery (core, per architettura) | nessuna credenziale confermata — provider mock finché non chiarito |
+| Jungle Scout | discovery (optional) | non disponibile per Dinamik — deprioritizzato |
+| Perpetua (ex-Sellics) | discovery (optional) | non disponibile per Dinamik — deprioritizzato |
+| Website Intelligence | discovery (core) | nessuna credenziale terza parte richiesta — unico provider con dati reali costruibile oggi |
+| **Helium 10** | discovery (optional, non più prioritario) | unico tool commerciale attivo (piano Basic, non Enterprise). **Lavoro specifico Helium10 (modalità manuale e browser automation) sospeso il 21/09** in attesa di chiarimento sui Termini di Servizio — vedi `docs/architecture.md` addendum |
+
+Dalla revisione architetturale del 21/09 (`docs/refactor-audit-2026-09-21.md`), il sistema non dipende più da un singolo connector: l'orchestrator sceglie tra i provider disponibili per ogni "capability" richiesta. Con Helium10 sospeso, però, **nessun provider con dati reali di mercato Amazon è oggi disponibile** — il sistema resta in mock mode per quella parte finché non si sblocca almeno un provider.
 
 ## Sviluppo
 

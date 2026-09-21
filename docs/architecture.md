@@ -160,3 +160,22 @@ Nessuna di queste blocca l'inizio della Milestone 1.
 ## Prossimo passo
 
 In attesa della tua approvazione su questa architettura (come da sezione 73 del prompt originale), poi si parte da Milestone 1 — repository, struttura directory, config, `.env.example` — interamente in mock mode.
+
+---
+
+## Addendum 2026-09-21 — Refactor: Helium10 Optional + Provider/Capability
+
+Milestone 1 e 2 completate e verificate (vedi `docs/database.md`). Prima dell'inizio di Milestone 3 è arrivata una revisione architetturale (`docs/refactor-audit-2026-09-21.md`, audit completo) che sostituisce il modello di connector 1:1 sopra descritto con una gerarchia Capability → IntelligenceProvider → AcquisitionAdapter (API/Browser/Manual/HTTP) → Orchestrator, per non dipendere da un singolo tool commerciale. Punto chiave dell'audit: la sezione 0 sopra ipotizzava Keepa/Jungle Scout/Perpetua come possibili fonti dati reali — nel frattempo è stato confermato che **nessuno di questi è disponibile a Dinamik**, e Helium 10 (piano Basic, non Enterprise) è l'unico tool commerciale attivo.
+
+**Decisione (21/09, in risposta alle domande aperte dell'audit):**
+
+1. `HELIUM10_MANUAL` (inserimento dati a mano da dashboard) **rimandato**, non costruito insieme a Phase C come proposto — Frank vuole prima chiarezza sui Termini di Servizio di Helium10 prima di costruire qualunque automazione (anche manuale/assistita) legata al loro prodotto.
+2. Stesso motivo per il Browser Automation Engine collegato a Helium10 — rimandato.
+3. Un VPS è già assegnato al progetto (conferma 21/09) — l'infrastruttura di deployment reale esiste, ma il deployment vero e proprio resta fuori dallo scope delle fasi attuali (Phase B/C).
+
+**Conseguenza pratica esplicita**: con Helium10 sospeso, il sistema — una volta completate le fasi in corso — avrà un'architettura Capability/Provider/Orchestrator generica e funzionante, ma **zero fonti dati reali collegate**: Website Intelligence (HTTP/HTML, nessuna credenziale terza parte) è l'unico provider "core" costruibile con dati reali oggi; Amazon e Keepa restano provider mock finché non si chiarisce quali credenziali Dinamik ha davvero. Questo non è un problema di questa fase — è il fatto che va tenuto presente prima di dichiarare "pronto" un qualunque research job che non sia in mock mode.
+
+Stato fasi:
+- **Phase A** (audit) — completata.
+- **Phase B** (database: colonne additive su `evidence`/`tool_calls`, tabelle `browser_sessions`/`browser_tasks`) — completata e verificata, vedi `docs/database.md` addendum.
+- **Phase C** (Capability/Provider/Registry/Orchestrator + Website/Amazon/Keepa provider, mock-first) — prossima, in attesa di conferma per procedere. Non includerà codice specifico Helium10 (nessun file in `app/tools/helium10/`) finché i punti 1-2 sopra non sono sbloccati.

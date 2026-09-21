@@ -10,6 +10,18 @@ AgentRun / AgentEvent / ToolCall / ErrorLog — the observability spine
   linked to the AgentRun that made it. Never stores secrets (section 13).
 * ErrorLog ("errors" table) — every caught error, classified, optionally
   linked back to the job/run/tool_call it happened in.
+
+ToolCall gained `provider` / `acquisition_method` / `capability` /
+`retry_count` / `cost_estimate` on 2026-09-21 (refactor: Helium10 Optional
++ Provider/Capability architecture), all nullable/defaulted — additive.
+`tool_name` stays (free-text, already in use conceptually); `provider` is
+the same concept made queryable against a closed vocabulary once
+app/tools/core exists. `capability` records what the call was FOR, so
+orchestrator fallback decisions (chose provider B after provider A failed
+for the same capability) are reconstructable from this table alone.
+`retry_count` and `cost_estimate` support the per-job intelligence budget
+(refactor doc, budget/tiered-enrichment sections) without recomputing it
+from AgentRun.estimated_cost_usd, which is aggregated at the wrong level.
 """
 from __future__ import annotations
 
@@ -64,6 +76,11 @@ class ToolCall(UUIDPrimaryKeyMixin, CreatedAtMixin, Base):
     status: Mapped[str] = mapped_column(String(20))  # ToolHealthStatus or SUCCESS/FAILED
     duration_ms: Mapped[int | None] = mapped_column(Integer, nullable=True)
     error: Mapped[str | None] = mapped_column(String, nullable=True)
+    provider: Mapped[str | None] = mapped_column(String(100), nullable=True, index=True)
+    acquisition_method: Mapped[str | None] = mapped_column(String(20), nullable=True)  # AcquisitionMethod
+    capability: Mapped[str | None] = mapped_column(String(50), nullable=True, index=True)  # Capability
+    retry_count: Mapped[int] = mapped_column(Integer, default=0)
+    cost_estimate: Mapped[float | None] = mapped_column(Numeric(10, 6), nullable=True)
 
 
 class ErrorLog(UUIDPrimaryKeyMixin, CreatedAtMixin, Base):
