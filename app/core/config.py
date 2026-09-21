@@ -141,6 +141,13 @@ class Settings(BaseSettings):
     # files into the working tree on every run.
     weekly_reports_dir: str = Field(default="reports/weekly", alias="WEEKLY_REPORTS_DIR")
 
+    # Milestone 15 (Exports, 2026-09-21): where the .xlsx brand export
+    # workbooks (app/services/export_service.py) land -- same
+    # env-overridable, repo-relative-by-default, tmp-dir-isolated-in-tests
+    # shape as weekly_reports_dir/browser_profiles_dir above, not a new
+    # pattern invented for this one feature.
+    exports_dir: str = Field(default="exports", alias="EXPORTS_DIR")
+
     # populated from YAML after construction, not an env var
     yaml_config: dict[str, Any] = Field(default_factory=dict, exclude=True)
 

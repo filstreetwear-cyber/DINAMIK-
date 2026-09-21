@@ -1189,3 +1189,91 @@ l'applicazione della migrazione. Suite rieseguita due volte di seguito,
 entrambe 252/252 stabili; DB confermato a zero righe (`WeeklyScan`/
 `EntitySnapshot`/`ResearchJob`/`Brand`) via query diretta dopo la
 pulizia di ogni sessione di test dal vivo.
+
+## Addendum (21) — 21/09: Milestone 15 — Exports
+
+Nel codice non c'era niente da cui dedurre lo scope: solo un feature
+flag morto (`enable_export`/`ENABLE_EXPORT`, dichiarato dal refactor
+originale, mai letto da nessuna parte — confermato con grep prima di
+scrivere una riga) e il nome "Exports" dalla sezione 58 della spec
+originale, senza nessun dettaglio altrove in questo documento.
+Diversamente dal gap dello scheduler di Milestone 14 (dove nessuno
+scope ragionevole esisteva senza sapere COSA cercare), qui la scelta
+era tra più opzioni ugualmente plausibili — non bloccante ma comunque
+una decisione di business, non tecnica. Chiarito direttamente con Fil
+prima di scrivere codice, due domande dirette: chi consuma l'export
+(risposta: team interno Dinamik, per prioritizzare l'outreach — non un
+pacchetto per un prospect, che si sovrapporrebbe alla Milestone 16 —
+`AuditorPackage`, già modellata come snapshot JSONB per-brand per Agent
+02, deliberatamente non duplicata qui) e in che formato (risposta:
+.xlsx nativo con formattazione reale, non CSV).
+
+**Costruito**: `app/services/export_service.py` — `build_brand_export_
+rows()` (una riga per Brand, non per AmazonProduct: il rep contatta un
+brand/seller, non un singolo ASIN, quindi i campi prodotto sono
+aggregati — conteggio/rating medio/somma review/miglior BSR — invece di
+ripetere le colonne brand su ogni riga ASIN), `write_brand_export_
+workbook()` (openpyxl — intestazione in grassetto, riga congelata,
+larghezza colonne calcolata sul contenuto reale, non CSV rinominato in
+.xlsx), `run_brand_export()` (orchestratore, sola lettura end-to-end —
+nessuna riga scritta nel DB, verificato non assunto — rispetta il
+feature flag `ENABLE_EXPORT`, primo vero consumatore di quel flag).
+Comando CLI `dinamik export brands [--status ACTIVE] [--limit N]`,
+stesso `typer.Typer` sub-app esistente. Nuova dipendenza reale
+`openpyxl` (+ `types-openpyxl` per mypy, stesso precedente di
+`types-PyYAML`) — non era installata prima, verificato con un import
+fallito prima di aggiungerla. Nuovo `Settings.exports_dir`
+(`EXPORTS_DIR`, default `exports/`), stesso pattern di
+`weekly_reports_dir` — isolato nei test con lo stesso fixture
+`tests/conftest.py` già esteso per gli altri due.
+
+**Riusa, non reinventa**: la stessa catena `ResearchResult.brand_id ->
+Evidence(entity_type="research_result")` che `scoring_engine.py`'s
+`_evidence_ids_for_brand` e `ai_analysis_engine.py`'s `_evidence_for_
+brand` già usano (scritta di nuovo qui, non importata tra servizi —
+coerente con come quei due la duplicano già tra loro invece di
+condividere un helper privato); `Score`/`Opportunity` letti
+direttamente per i due `OpportunityType` implementati, stesso insieme
+già ristretto da `app/services/weekly_scan.py`'s
+`_IMPLEMENTED_OPPORTUNITY_TYPES` — nessuna nuova logica di scoring o di
+opportunity.
+
+**Deliberatamente fuori scope**: nessun endpoint API (`POST /exports`
+o simile) — solo CLI, perché nessuno lo ha chiesto e il consumo è
+interno via file, non via richiesta HTTP; nessun export per singolo
+job/ricerca (solo per stato Brand) — non richiesto, e "tutti i brand
+ACTIVE" è già il caso d'uso reale per prioritizzare l'outreach; nessuna
+sovrapposizione con `AuditorPackage` (Milestone 16, handoff per-brand
+per Agent 02) — due export con scopi diversi, non un'unica feature
+sdoppiata.
+
+**Verificato con dati reali**: seed via `dinamik pipeline run` reale
+(mock mode) contro Postgres reale, poi `run_brand_export()` chiamato
+direttamente — workbook `.xlsx` reale ispezionato riga per riga con
+`openpyxl.load_workbook` (non solo "il file esiste"): intestazioni
+corrette, font grassetto sulla riga 1, `freeze_panes` impostato, dati
+reali del brand mock (rating medio 4.45, 3113 review totali, BSR
+migliore 430, opportunity level/score/confidence/motivazione presi
+davvero da `Score`/`Opportunity`, non fabbricati). Verificato anche il
+percorso `ENABLE_EXPORT=false` (eccezione dedicata `ExportDisabledError`,
+non un'eccezione generica) e il filtro per status con zero risultati.
+Righe committate dal test dal vivo (CLI) ripulite subito con DELETE
+mirate per tabella, file `.xlsx` di test rimossi, mai un TRUNCATE
+globale.
+
+**Verifica eseguita**: `tests/test_export_service.py`, 12 test nuovi —
+unitari puri per `_summarize_reasons()`; integrazione contro Postgres
+reale (pattern a rollback, stesso di `test_pipeline_orchestrator.py`/
+`test_weekly_scan.py`) per la costruzione delle righe, il filtro per
+status, la scrittura reale del workbook (ispezionato con
+`openpyxl.load_workbook`, non solo verificato che il file esista),
+la garanzia di sola lettura (conteggio `Brand` invariato prima/dopo),
+ed `ExportDisabledError`; test CLI reali via `CliRunner` (export dopo
+un run pipeline reale, zero risultati, export disabilitato). **264 test
+totali (262 passati, 2 saltati per lo stesso motivo di rete di
+sempre)**, `ruff check .`/`mypy app tests` puliti (104 file sorgente),
+`alembic check` senza operazioni pendenti (nessuna modifica di schema —
+questa milestone non tocca il database, solo lo legge). Suite rieseguita
+due volte di seguito, entrambe 264/264 stabili; DB confermato a zero
+righe via query diretta dopo la pulizia di ogni sessione di test dal
+vivo.

@@ -55,6 +55,7 @@ from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
 
 from app.core.config import Settings, get_settings
 from app.models import Brand, ResearchJob, Score, WeeklyScan
+from app.services.export_service import ExportDisabledError, run_brand_export
 from app.services.pipeline_orchestrator import run_research_pipeline
 from app.services.weekly_scan import run_weekly_scan
 
@@ -68,11 +69,13 @@ jobs_app = typer.Typer(help="Inspect research jobs.")
 brands_app = typer.Typer(help="Inspect resolved brands.")
 pipeline_app = typer.Typer(help="Run the Milestone 11 research pipeline.")
 scan_app = typer.Typer(help="Run and inspect the weekly intelligence scan.")
+export_app = typer.Typer(help="Export data to spreadsheets for the internal team.")
 
 app.add_typer(jobs_app, name="jobs")
 app.add_typer(brands_app, name="brands")
 app.add_typer(pipeline_app, name="pipeline")
 app.add_typer(scan_app, name="scan")
+app.add_typer(export_app, name="export")
 
 
 @app.command()
@@ -383,6 +386,40 @@ async def _scan_history_async(limit: int) -> None:
             f"changes={row.changes_detected} (sig={row.changes_significant})  "
             f"new_opps={row.opportunities_new}  errors={len(row.errors or [])}"
         )
+
+
+@export_app.command("brands")
+def export_brands(
+    status: str = typer.Option("ACTIVE", help="Brand.status filter — ACTIVE or MERGED."),
+    limit: int = typer.Option(2000, help="Max brands to include, most recently seen first."),
+) -> None:
+    """Writes a .xlsx workbook (one row per brand, aggregated product
+    stats + latest Amazon/Business Value opportunity + evidence count)
+    to EXPORTS_DIR -- the internal-team spreadsheet Frank's team uses to
+    prioritize outreach across scanned brands (Milestone 15, scope
+    clarified directly with Fil 2026-09-21 -- not a prospect-facing
+    package, see app/services/export_service.py's own docstring for why
+    that's Milestone 16's job instead). Read-only: never writes to the
+    database."""
+    asyncio.run(_export_brands_async(status=status, limit=limit))
+
+
+async def _export_brands_async(*, status: str, limit: int) -> None:
+    settings = get_settings()
+    engine, factory = _session_factory(settings)
+    try:
+        async with factory() as session:
+            try:
+                summary = await run_brand_export(session, settings=settings, status=status, limit=limit)
+            except ExportDisabledError as exc:
+                typer.echo(f"export disabled: {exc}")
+                raise typer.Exit(code=1) from exc
+    finally:
+        await engine.dispose()
+
+    typer.echo(f"rows_exported: {summary.rows_exported}")
+    typer.echo(f"status_filter: {summary.status_filter}")
+    typer.echo(f"path: {summary.path}")
 
 
 if __name__ == "__main__":
