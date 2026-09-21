@@ -50,3 +50,9 @@ testpaths = ["tests"]
 [tool.ruff]
 line-length = 100
 target-version = "py312"
+# migrations/versions/*.py is generated fresh by Alembic's own
+# script.py.mako template on every `alembic revision`, using Union[...]
+# instead of X | Y — not worth hand-fixing on every migration. env.py IS
+# hand-maintained (see its DATABASE_URL/model-import edits) and stays
+# linted normally.
+extend-exclude = ["migrations/versions"]

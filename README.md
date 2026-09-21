@@ -1,6 +1,6 @@
 # Dinamik Advisor — Amazon Intelligence Platform
 
-**Stato attuale: Milestone 1 completata — repository, architettura, configurazione.**
+**Stato attuale: Milestone 2 completata — database e migrations, su PostgreSQL reale.**
 
 Piattaforma proprietaria di Dinamik Advisor per l'individuazione, analisi e
 qualificazione di brand/seller Amazon con margine di crescita commerciale.
@@ -14,6 +14,10 @@ Seller Fast Intelligence, Customer Intelligence).
 Vedi [`docs/architecture.md`](docs/architecture.md) per la proposta
 approvata: stack, schema database, struttura moduli, interfacce dei tool,
 credenziali necessarie e piano delle milestone.
+
+Vedi [`docs/database.md`](docs/database.md) per lo schema applicato, le
+decisioni di design (UUID, vocabolari come stringhe non enum nativi,
+evidence polimorfica) e come rieseguire le migration.
 
 ## Installazione
 
@@ -56,7 +60,7 @@ make lint
 ## Milestone
 
 - [x] 1 — Repository + architecture + config
-- [ ] 2 — Database + migrations
+- [x] 2 — Database + migrations
 - [ ] 3 — Tool abstraction layer
 - [ ] 4 — Mock connectors
 - [ ] 5 — Amazon Scout discovery

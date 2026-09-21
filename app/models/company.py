@@ -1,0 +1,57 @@
+"""Company and Brand — kept as separate entities (spec section 7-8: company != brand != seller)."""
+from __future__ import annotations
+
+import uuid
+from datetime import datetime
+from typing import TYPE_CHECKING
+
+from sqlalchemy import DateTime, ForeignKey, String
+from sqlalchemy.orm import Mapped, mapped_column, relationship
+
+from app.models.base import Base, TimestampMixin, UUIDPrimaryKeyMixin, utcnow
+
+if TYPE_CHECKING:
+    from app.models.amazon import AmazonSeller
+    from app.models.contact import Contact
+
+
+class Company(UUIDPrimaryKeyMixin, TimestampMixin, Base):
+    __tablename__ = "companies"
+
+    legal_name: Mapped[str] = mapped_column(String(255))
+    brand_name: Mapped[str | None] = mapped_column(String(255), nullable=True)
+    domain: Mapped[str | None] = mapped_column(String(255), nullable=True, index=True)
+    country: Mapped[str | None] = mapped_column(String(2), nullable=True)
+    city: Mapped[str | None] = mapped_column(String(255), nullable=True)
+    industry: Mapped[str | None] = mapped_column(String(255), nullable=True)
+    company_size: Mapped[str | None] = mapped_column(String(50), nullable=True)
+    linkedin_url: Mapped[str | None] = mapped_column(String(500), nullable=True)
+    email: Mapped[str | None] = mapped_column(String(255), nullable=True)
+    phone: Mapped[str | None] = mapped_column(String(50), nullable=True)
+
+    brands: Mapped[list[Brand]] = relationship(back_populates="company")
+    contacts: Mapped[list[Contact]] = relationship(back_populates="company")
+
+
+class Brand(UUIDPrimaryKeyMixin, TimestampMixin, Base):
+    __tablename__ = "brands"
+
+    company_id: Mapped[uuid.UUID | None] = mapped_column(
+        ForeignKey("companies.id", ondelete="SET NULL"), nullable=True, index=True
+    )
+    name: Mapped[str] = mapped_column(String(255), index=True)
+    website: Mapped[str | None] = mapped_column(String(500), nullable=True)
+    amazon_storefront: Mapped[str | None] = mapped_column(String(500), nullable=True)
+    description: Mapped[str | None] = mapped_column(String(2000), nullable=True)
+    country: Mapped[str | None] = mapped_column(String(2), nullable=True)
+    # first/last_seen_at track the discovery window independently of
+    # created_at/updated_at (row bookkeeping) — a brand can be RE-observed
+    # in a later research job without its row being freshly "created".
+    first_seen_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
+    last_seen_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), default=utcnow, onupdate=utcnow
+    )
+    status: Mapped[str] = mapped_column(String(50), default="ACTIVE")
+
+    company: Mapped[Company | None] = relationship(back_populates="brands")
+    sellers: Mapped[list[AmazonSeller]] = relationship(back_populates="brand")
