@@ -118,6 +118,23 @@ weekly_scan:
   day: sunday
   time: "06:00"
   timezone: "Europe/Rome"
+  # 2026-09-22 (post Reality Audit, "controlled real weekly intelligence"
+  # implementation pass): which category the scan's underlying discovery
+  # pipeline (run_research_pipeline, via a ResearchJob) searches. This was
+  # the one BUSINESS_DECISION_REQUIRED gap the Reality Audit flagged for
+  # this section (§26/§15 of that audit) -- Fil confirmed the first real
+  # value directly: "Casa e cucina" (matches the only category the mock
+  # fixture (fixtures/amazon_mock_products.json) actually has, so this
+  # changes nothing for existing MOCK_MODE=true tests/runs). Only the
+  # FIRST entry is used today (app/services/weekly_scan.py picks
+  # categories[0]) -- a list, not a single string, because a future
+  # multi-category scan is the natural next step once one category is
+  # validated end to end, and that should be a config change, not a code
+  # change. Outside MOCK_MODE, an empty list is a hard, explicit
+  # SCAN_CONFIGURATION_REQUIRED error (see weekly_scan.py) rather than a
+  # silent scan of an arbitrary/undefined category.
+  categories:
+    - "Casa e cucina"
   # Significance thresholds -- not arbitrary in the sense of "picked
   # without thought", but not calibrated against real outcome data either
   # (none exists yet, same honest limit scoring_engine.py's own docstring

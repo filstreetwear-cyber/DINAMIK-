@@ -1277,3 +1277,130 @@ questa milestone non tocca il database, solo lo legge). Suite rieseguita
 due volte di seguito, entrambe 264/264 stabili; DB confermato a zero
 righe via query diretta dopo la pulizia di ogni sessione di test dal
 vivo.
+
+## Addendum (22) — 22/09: implementazione post Reality Audit (parte
+sbloccabile senza VPS/credenziali)
+
+Punto di partenza: `dinamik-reality-audit-2026-09-21.md` (audit
+indipendente, sola lettura, consegnato il 21/09 — vedi quel file per la
+fotografia completa dello stato reale del sistema prima di questa
+pass). Fil ha chiesto di passare da "codice reale + dati mock" a
+"validazione reale controllata", con un ordine di priorità P0/P1/P2
+esplicito. Prima di scrivere codice, tre vincoli reali sono emersi e
+sono stati verificati direttamente, non assunti:
+
+1. **Nessun accesso VPS da questa sessione** — nessuna chiave SSH,
+   nessun host/IP salvato. `ollama --version`, build/run Docker reali,
+   misure RAM/latenza reali restano `[BLOCKED]`, esattamente come
+   l'audit aveva già concluso — Fil ha confermato di rimandare questo
+   pezzo, non di sbloccarlo con un workaround.
+2. **Uscita di rete di questo sandbox bloccata da policy
+   organizzativa** verso `sellingpartnerapi-eu.amazon.com`,
+   `www.amazon.it`, `api.keepa.com` (403 dal gateway, `connect_rejected
+   — organization policy` — non un limite tecnico aggirabile, verificato
+   con una chiamata reale durante questa pass, non assunto dall'audit
+   precedente).
+3. **Scoperta architetturale che cambia il piano P0 così come scritto**:
+   `docs/architecture.md` (sezione 0, già presente prima di questo
+   audit) e il docstring di `app/tools/amazon/provider.py` dicono
+   entrambi la stessa cosa, riverificata qui — SP-API è account-scoped
+   (funziona solo su un account Amazon già gestito da Dinamik, inutile
+   per il discovery di *nuovi* prospect) e PA-API richiede un account
+   Associates con vendite qualificanti, pensata per link di affiliazione
+   non per ricerca di mercato. **Non è un gap di credenziali — nessuna
+   delle due API può fare quello che il discovery esistente
+   (`AmazonProvider`/`amazon_scout/discovery.py`) fa oggi**, con o senza
+   chiavi reali. Costruire un client SP-API ora significherebbe
+   costruire il pezzo giusto per una feature futura (un Ads
+   Agent/Auditor su clienti già acquisiti) ma inutile per il discovery.
+   Segnalato a Fil esplicitamente, non implementato silenziosamente
+   come se fosse "solo credenziali mancanti". La domanda aperta (non
+   decisa qui, non un'invenzione di questa pass): la fonte dati
+   legittima per il discovery potrebbe essere Keepa (ha un vero Product
+   Finder/database search, non solo enrichment) o Jungle Scout/Helium10
+   — non lo scraping, vietato sia dalla richiesta di Fil sia dai
+   Conditions of Use di Amazon.
+
+**Cosa è stato realmente costruito in questa pass** (tutto verificabile
+in questo sandbox, zero dipendenza da VPS/credenziali/rete esterna):
+
+- **`weekly_scan.categories`** (`config/default.yaml`) — la vera lacuna
+  BUSINESS_DECISION_REQUIRED che l'audit aveva segnalato per "quale
+  categoria scansionare". Fil ha dato un valore reale: `"Casa e
+  cucina"` (che non cambia nulla per MOCK_MODE=true esistente, essendo
+  l'unica categoria nella fixture mock). `run_weekly_scan()` ora legge
+  `categories[0]` invece di passare sempre `category=None`; fuori
+  MOCK_MODE, categorie vuote sollevano `ScanConfigurationRequiredError`
+  (`SCAN_CONFIGURATION_REQUIRED`) prima di toccare il database, anche
+  in `dry_run` — invece di scansionare silenziosamente una categoria
+  non definita.
+- **Fix networking Docker→Ollama** (`Settings.ollama_base_url` /
+  `OLLAMA_BASE_URL`, `app/ai/bootstrap.py`, `docker-compose.yml`): il
+  gap reale che l'audit aveva trovato (`localhost:11434` dentro un
+  container risolve al container stesso, non all'host) ora ha un
+  override esplicito, mai applicato per mutazione in-place del
+  `yaml_config` condiviso e cache-ato (`@lru_cache`) — copiato prima di
+  scrivere, verificato con un test dedicato che il dict originale resta
+  intatto. `docker-compose.yml`: `api`/`worker`/`beat` ora hanno
+  `extra_hosts: host.docker.internal:host-gateway` +
+  `OLLAMA_BASE_URL=http://host.docker.internal:11434` di default —
+  **non verificato contro una VPS reale** (nessun demone Docker
+  disponibile qui, come già l'audit), solo `docker compose config`
+  validato in sintassi.
+- **Retry/backoff Celery** (`app/workers/tasks.py`): le tre task
+  (`run_research_pipeline_task`, `run_scheduled_research_job`,
+  `run_weekly_scan_task`) ora hanno `autoretry_for` su errori
+  plausibilmente transitori (`ProviderUnavailableError`,
+  `ProviderRateLimitedError`, `TimeoutError`, `ConnectionError`,
+  `OperationalError` di SQLAlchemy) con backoff esponenziale +
+  jitter, `max_retries=3` — deliberatamente NON su
+  `ProviderNotConfiguredError`/`ProviderAuthError` (errori di
+  configurazione permanenti: ritentarli sprecherebbe solo tentativi
+  prima di fallire comunque allo stesso modo).
+- **Guard di idempotenza pragmatico, non una vera chiave** (stesso
+  file): un retry Celery di `run_research_pipeline_task` con
+  parametri identici entro una finestra di 300s riusa il
+  `ResearchJob` esistente invece di crearne uno duplicato —
+  esplicitamente documentato come un limite noto (nessuna colonna
+  `celery_task_id`, nessun vincolo unique — richiederebbe una
+  migrazione, cambiamento più grande di quanto questa pass fa), non
+  una garanzia forte. `run_scheduled_research_job`'s nome è passato da
+  granularità minuto a granularità giorno, altrimenti ogni retry
+  avrebbe generato un nome nuovo e il guard non avrebbe mai trovato un
+  duplicato da deduplicare. `run_weekly_scan_task` non ha bisogno dello
+  stesso guard: la sua idempotenza reale (vincolo unique su
+  `period_end`) esisteva già da Milestone weekly-scan.
+- **Healthcheck `worker`/`beat`** (`docker-compose.yml`): prima
+  assenti del tutto (trovato dall'audit). `worker`: `celery inspect
+  ping` (round-trip reale contro Redis, non solo "il processo è vivo").
+  `beat`: `pgrep` sul processo (beat non ha un endpoint di rete da
+  interrogare — documentato come limite: conferma solo che il processo
+  esiste, non che sta effettivamente ticchettando lo schedule).
+- **Volumi persistenti `exports/`/`reports/weekly/`** — prima assenti
+  (trovato dall'audit: una ricreazione container perdeva ogni export
+  `.xlsx` e ogni report settimanale). Nuovi volumi Docker nominati
+  `dinamik_exports`/`dinamik_reports`, montati su `api` e `worker`
+  (unici container che scrivono quei percorsi).
+
+**Deliberatamente non toccato in questa pass** (bloccato da VPS/rete/
+decisione di business, non da mancanza di tempo): client Amazon reale
+(vedi punto 3 sopra — richiede prima una decisione di Fil/Frank sulla
+fonte dati, non solo credenziali); validazione Ollama su VPS reale
+(RAM/latenza/tokens-per-sec — nessuna misura fabbricata, semplicemente
+non fatta); build/run Docker reali; wiring pipeline di Website
+Intelligence (P1, non toccato per restare nello scope P0 di questa
+pass); tutto ciò che l'audit aveva già marcato `[BLOCKED]` resta
+`[BLOCKED]`.
+
+**Verifica eseguita**: 7 test nuovi (3 in `tests/test_weekly_scan.py`
+per il guard `ScanConfigurationRequiredError` e la categoria
+configurata; 2 in `tests/test_workers.py` per la policy di
+retry/backoff e il guard di deduplicazione; 2 in
+`tests/test_ai_provider.py` per l'override `OLLAMA_BASE_URL` e la
+non-mutazione del `yaml_config` condiviso). Suite completa: **271
+passati, 2 saltati (stesso motivo di rete di sempre), 0 falliti** —
+baseline precedente 264/2 preservata, nessuna regressione. `ruff
+check app/ tests/` e `mypy app/` puliti dopo le modifiche.
+`docker compose config` validato in sintassi (nessun demone
+disponibile per una validazione runtime). Nessuna migrazione Alembic
+necessaria (nessuna modifica di schema in questa pass).

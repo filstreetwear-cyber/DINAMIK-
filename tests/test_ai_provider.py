@@ -149,6 +149,32 @@ def test_ai_config_defaults_to_qwen3_1_7b(monkeypatch: pytest.MonkeyPatch):
     assert settings.ai_config()["local"]["model"] == "qwen3:1.7b"
 
 
+def test_build_default_ai_gateway_honors_ollama_base_url_override(monkeypatch: pytest.MonkeyPatch):
+    """2026-09-22 (post Reality Audit §12/§18, Docker->Ollama networking
+    fix): OLLAMA_BASE_URL, when set, must override config/default.yaml's
+    ai.local.base_url (http://localhost:11434, unusable from inside a
+    Docker container) without mutating the shared, @lru_cache'd
+    settings.yaml_config for anyone else calling settings.ai_config()."""
+    monkeypatch.setenv("OLLAMA_BASE_URL", "http://host.docker.internal:11434")
+    settings = _mock_settings(monkeypatch)
+
+    gateway = build_default_ai_gateway(settings)
+    assert gateway is not None
+    assert gateway._provider._base_url == "http://host.docker.internal:11434"
+
+    # The override must not have leaked into the shared yaml_config dict.
+    assert settings.yaml_config["ai"]["local"]["base_url"] == "http://localhost:11434"
+
+
+def test_build_default_ai_gateway_uses_config_default_when_ollama_base_url_unset(monkeypatch: pytest.MonkeyPatch):
+    monkeypatch.delenv("OLLAMA_BASE_URL", raising=False)
+    settings = _mock_settings(monkeypatch)
+
+    gateway = build_default_ai_gateway(settings)
+    assert gateway is not None
+    assert gateway._provider._base_url == "http://localhost:11434"
+
+
 # --- AIAnalyst ----------------------------------------------------------------
 
 

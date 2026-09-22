@@ -29,6 +29,22 @@ def build_default_ai_gateway(settings: Settings | None = None) -> AIGateway | No
     if not config.get("enabled", True):
         return None
 
+    if settings.ollama_base_url:
+        # 2026-09-22 (post Reality Audit, Docker->Ollama networking fix,
+        # §12/§18): config/default.yaml's ai.local.base_url stays the
+        # local-dev default (http://localhost:11434); OLLAMA_BASE_URL
+        # overrides it for a real container deploy where localhost would
+        # resolve to the container itself. `config` here is `dict(...)`
+        # (a shallow copy, see Settings.ai_config()'s own docstring) --
+        # `config["local"]` is still a reference into the cached, shared
+        # settings.yaml_config dict (get_settings() is @lru_cache'd), so
+        # mutating it in place would leak into every other caller of
+        # settings.ai_config() for the rest of the process. Copy "local"
+        # before writing to it.
+        local_config = dict(config.get("local", {}))
+        local_config["base_url"] = settings.ollama_base_url
+        config = {**config, "local": local_config}
+
     router = AIRouter(config)
     provider = router.resolve_provider()
     return AIGateway(provider)

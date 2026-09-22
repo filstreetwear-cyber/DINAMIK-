@@ -125,6 +125,30 @@ _IMPLEMENTED_OPPORTUNITY_TYPES: tuple[str, ...] = (
 _LIFECYCLE_STATES = ("NEW", "CONTINUING", "IMPROVING", "DETERIORATING", "RESOLVED")
 
 
+class ScanConfigurationRequiredError(Exception):
+    """Raised by run_weekly_scan() when MOCK_MODE=false and
+    config/default.yaml's weekly_scan.categories is empty. Added 2026-09-22
+    (post Reality Audit implementation pass) -- the audit's §26/§15 flagged
+    "which category to scan" as a real BUSINESS_DECISION_REQUIRED gap: the
+    scheduled research job used to silently pass category=None, which in
+    MOCK_MODE happens to match the mock fixture's only category ("Casa e
+    cucina") but against a real Amazon-derived provider would mean
+    "scan an undefined category" -- exactly the kind of silent, arbitrary
+    behavior the audit's own "First Real Scan" section (§28) explicitly
+    asked NOT to allow. In MOCK_MODE this never fires (mock runs are
+    development/test, not a "real scan" in the audit's sense) even if
+    categories happens to be empty."""
+
+    def __init__(self) -> None:
+        super().__init__(
+            "SCAN_CONFIGURATION_REQUIRED: weekly_scan.categories is empty in "
+            "config/default.yaml (or its environment override). A real "
+            "(MOCK_MODE=false) scan needs at least one explicitly configured "
+            "category before it can run -- see config/default.yaml's "
+            "weekly_scan.categories comment."
+        )
+
+
 @dataclass(frozen=True)
 class ChangeThresholds:
     rating_change_threshold: float = 0.3
@@ -359,6 +383,20 @@ async def run_weekly_scan(
     period_start, period_end = _period_bounds(reference_time)
     thresholds = ChangeThresholds.from_config(settings)
 
+    # SCAN_CONFIGURATION_REQUIRED guard (2026-09-22, post Reality Audit) --
+    # checked before dry_run too, so a dry-run preview is honest about
+    # whether a real run would even start. Never fires in MOCK_MODE: a
+    # mock run is development/test, not the audit's "real scan" concept,
+    # and every existing MOCK_MODE test predates weekly_scan.categories.
+    weekly_scan_cfg = settings.weekly_scan_config()
+    categories = list(weekly_scan_cfg.get("categories", []))
+    if not settings.mock_mode and not categories:
+        raise ScanConfigurationRequiredError()
+    category = categories[0] if categories else None
+    # Only the first configured category is scanned today -- see
+    # config/default.yaml's weekly_scan.categories comment for why this is
+    # a list (multi-category is the natural next step, not built here).
+
     if dry_run:
         # Spec section 28: discovers the universe, shows what WOULD run,
         # touches no persistent opportunity/scan state at all -- no
@@ -431,7 +469,7 @@ async def run_weekly_scan(
     errors: list[dict[str, Any]] = []
 
     marketplace = settings.yaml_config.get("default_marketplace", "IT")
-    job = ResearchJob(name=f"Weekly scan {period_end:%Y-%m-%d}", marketplace=marketplace, category=None)
+    job = ResearchJob(name=f"Weekly scan {period_end:%Y-%m-%d}", marketplace=marketplace, category=category)
     session.add(job)
     await session.flush()
     scan.research_job_id = job.id

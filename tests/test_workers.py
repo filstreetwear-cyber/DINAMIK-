@@ -104,6 +104,50 @@ def test_run_research_pipeline_task_creates_job_and_commits():
     assert body["job_id"]
     assert "products_found" in body
     assert "scores_created" in body
+    assert body["deduplicated"] is False
+
+
+def test_run_research_pipeline_task_retry_policy_is_configured():
+    """2026-09-22 (post Reality Audit §25 "Celery reliability"): the audit
+    found zero retry/backoff on any task (grep of app/workers/ returned
+    nothing). This asserts the real Celery task object's registered
+    options, not a re-implementation of Celery's own retry mechanics."""
+    task = run_research_pipeline_task
+    assert task.max_retries == 3
+    assert task.retry_backoff is True
+    assert task.retry_backoff_max == 600
+    assert task.retry_jitter is True
+    # ProviderNotConfiguredError/ProviderAuthError (permanent config/
+    # credential errors) must NOT be in this set -- retrying them would
+    # just waste attempts before failing the same way every time.
+    from app.tools.core.provider import (
+        ProviderNotConfiguredError,
+        ProviderRateLimitedError,
+        ProviderUnavailableError,
+    )
+
+    assert ProviderUnavailableError in task.autoretry_for
+    assert ProviderRateLimitedError in task.autoretry_for
+    assert ProviderNotConfiguredError not in task.autoretry_for
+
+
+def test_run_research_pipeline_task_deduplicates_identical_call_within_window():
+    """Best-effort idempotency guard (§25/§38) -- calling the task body
+    twice with identical parameters (simulating a Celery autoretry
+    re-invocation after a transient failure) must not create a second
+    ResearchJob row."""
+    first = run_research_pipeline_task.apply(
+        kwargs={"name": "worker-dedup-test-job", "marketplace": "IT", "category": "Casa e cucina"}
+    )
+    assert first.successful(), first.traceback
+    assert first.result["deduplicated"] is False
+
+    second = run_research_pipeline_task.apply(
+        kwargs={"name": "worker-dedup-test-job", "marketplace": "IT", "category": "Casa e cucina"}
+    )
+    assert second.successful(), second.traceback
+    assert second.result["deduplicated"] is True
+    assert second.result["job_id"] == first.result["job_id"]
 
 
 async def _fetch_job_by_id(job_id: str) -> ResearchJob | None:

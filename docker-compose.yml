@@ -80,6 +80,32 @@ services:
       # this block wins on conflicting keys.
       DATABASE_URL: postgresql+asyncpg://dinamik:dinamik@postgres:5432/dinamik_amazon_intelligence
       REDIS_URL: redis://redis:6379/0
+      # 2026-09-22 (post Reality Audit, §12/§18): Ollama is assumed to run
+      # on the Docker HOST (there is deliberately no `ollama:` compose
+      # service -- see docs/architecture.md), so `localhost:11434` (the
+      # ai.local.base_url default) would resolve to this container itself,
+      # not the host. `host.docker.internal` + the `extra_hosts` entry
+      # below is the standard Linux Docker fix (Docker Desktop already
+      # resolves it without the extra_hosts entry; the entry is harmless
+      # there). Override with a real value here or in .env once Ollama's
+      # actual reachable address on the target VPS is known -- this
+      # default is a reasonable guess, not verified against a real VPS
+      # (the Reality Audit's own §12/§18 finding: this repo has never had
+      # a Docker daemon available to test it against).
+      OLLAMA_BASE_URL: ${OLLAMA_BASE_URL:-http://host.docker.internal:11434}
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    volumes:
+      # 2026-09-22 (post Reality Audit, §16/§29): exports/ and
+      # reports/weekly/ (Settings.exports_dir/weekly_reports_dir, both
+      # relative to WORKDIR /app -- see Dockerfile) had NO volume at all
+      # before this change, so a container recreation silently lost every
+      # .xlsx export and every weekly intelligence report. Shared with
+      # `worker` (the container that actually writes weekly reports via
+      # the Celery task) so both see the same files regardless of which
+      # container a `dinamik export`/`dinamik scan weekly` command runs in.
+      - dinamik_exports:/app/exports
+      - dinamik_reports:/app/reports
     ports:
       - "8000:8000"
     depends_on:
@@ -106,11 +132,28 @@ services:
     environment:
       DATABASE_URL: postgresql+asyncpg://dinamik:dinamik@postgres:5432/dinamik_amazon_intelligence
       REDIS_URL: redis://redis:6379/0
+      OLLAMA_BASE_URL: ${OLLAMA_BASE_URL:-http://host.docker.internal:11434}
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    volumes:
+      - dinamik_exports:/app/exports
+      - dinamik_reports:/app/reports
     depends_on:
       api:
         condition: service_healthy
       redis:
         condition: service_healthy
+    healthcheck:
+      # 2026-09-22 (post Reality Audit, §15/§28): this service previously
+      # had NO healthcheck at all. `celery inspect ping` is Celery's own
+      # documented liveness probe -- it round-trips through the real
+      # broker (Redis), so it also catches a worker that started but can't
+      # reach Redis, not just a dead process.
+      test: ["CMD-SHELL", "celery -A app.workers.celery_app inspect ping -d celery@$$HOSTNAME || exit 1"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 20s
 
   beat:
     build:
@@ -124,11 +167,26 @@ services:
     environment:
       DATABASE_URL: postgresql+asyncpg://dinamik:dinamik@postgres:5432/dinamik_amazon_intelligence
       REDIS_URL: redis://redis:6379/0
+      OLLAMA_BASE_URL: ${OLLAMA_BASE_URL:-http://host.docker.internal:11434}
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
     depends_on:
       api:
         condition: service_healthy
       redis:
         condition: service_healthy
+    healthcheck:
+      # 2026-09-22 (post Reality Audit, §15/§28): beat has no network
+      # endpoint to probe (it only writes schedule state to disk/Redis),
+      # so this only confirms the process itself is alive, not that it is
+      # ticking correctly -- a real Beat schedule verification still needs
+      # a running instance observed over wall-clock time (Reality Audit
+      # §14/§17), which this healthcheck does not and cannot replace.
+      test: ["CMD-SHELL", "pgrep -f 'celery.*beat' || exit 1"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 15s
 
   browser-worker:
     build:
@@ -163,3 +221,5 @@ volumes:
   postgres_data:
   redis_data:
   browser_profiles:
+  dinamik_exports:
+  dinamik_reports:

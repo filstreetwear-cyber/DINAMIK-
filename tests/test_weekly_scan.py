@@ -66,6 +66,7 @@ from app.models import (
 from app.models.amazon import AmazonProduct, AmazonSeller
 from app.services.weekly_scan import (
     ChangeThresholds,
+    ScanConfigurationRequiredError,
     _period_bounds,
     classify_opportunity_lifecycle,
     compute_changes,
@@ -262,6 +263,59 @@ def _ai_claims_draft() -> str:
 @pytest.fixture
 def ai_gateway() -> AIGateway:
     return AIGateway(MockAIProvider(structured_response=_ai_claims_draft()))
+
+
+@pytest.mark.asyncio
+async def test_run_weekly_scan_raises_scan_configuration_required_outside_mock_mode_with_no_category(
+    session: AsyncSession,
+):
+    """2026-09-22, post Reality Audit implementation pass: the audit's
+    §26/§15 flagged "which category to scan" as a real business decision
+    with no safe default -- this is the guard that stops a real
+    (MOCK_MODE=false) scan from silently running against an undefined
+    category instead of failing clearly."""
+    settings = get_settings()
+    real_mode_no_category = settings.model_copy(update={"mock_mode": False})
+    real_mode_no_category.yaml_config = {
+        **settings.yaml_config,
+        "weekly_scan": {**settings.yaml_config.get("weekly_scan", {}), "categories": []},
+    }
+    with pytest.raises(ScanConfigurationRequiredError):
+        await run_weekly_scan(session, settings=real_mode_no_category)
+
+
+@pytest.mark.asyncio
+async def test_run_weekly_scan_dry_run_also_requires_category_outside_mock_mode(session: AsyncSession):
+    """The guard fires before the dry_run branch too -- a dry-run preview
+    must be honest about whether a real run would even start."""
+    settings = get_settings()
+    real_mode_no_category = settings.model_copy(update={"mock_mode": False})
+    real_mode_no_category.yaml_config = {
+        **settings.yaml_config,
+        "weekly_scan": {**settings.yaml_config.get("weekly_scan", {}), "categories": []},
+    }
+    with pytest.raises(ScanConfigurationRequiredError):
+        await run_weekly_scan(session, settings=real_mode_no_category, dry_run=True)
+
+
+@pytest.mark.asyncio
+async def test_run_weekly_scan_underlying_research_job_uses_configured_category(
+    session: AsyncSession, provider_orchestrator: IntelligenceSourceOrchestrator, ai_gateway: AIGateway
+):
+    """Regression check that config/default.yaml's weekly_scan.categories[0]
+    ("Casa e cucina") actually reaches the ResearchJob the scan creates --
+    before this change it was hardcoded to category=None."""
+    summary = await run_weekly_scan(
+        session,
+        provider_orchestrator=provider_orchestrator,
+        ai_gateway=ai_gateway,
+        reference_time=datetime(2026, 2, 1, 6, 0, tzinfo=UTC),
+    )
+    # summary.scan_id is the WeeklyScan id, not the ResearchJob id -- fetch
+    # the WeeklyScan row itself to get its research_job_id.
+    scan = (await session.execute(select(WeeklyScan).where(WeeklyScan.id == summary.scan_id))).scalar_one()
+    job = (await session.execute(select(ResearchJob).where(ResearchJob.id == scan.research_job_id))).scalar_one()
+    assert job.category == "Casa e cucina"
 
 
 @pytest.mark.asyncio

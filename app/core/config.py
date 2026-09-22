@@ -148,6 +148,19 @@ class Settings(BaseSettings):
     # pattern invented for this one feature.
     exports_dir: str = Field(default="exports", alias="EXPORTS_DIR")
 
+    # 2026-09-22 (post Reality Audit, Docker->Ollama networking fix): the
+    # Reality Audit (§12/§18) found a real, unaddressed deploy gap --
+    # config/default.yaml's ai.local.base_url defaults to
+    # http://localhost:11434, which inside a Docker container resolves to
+    # the CONTAINER itself, not the Docker host where Ollama actually runs.
+    # Left unset (the default everywhere except a real container deploy),
+    # nothing changes -- app/ai/bootstrap.py only overrides
+    # ai.local.base_url when this is set. See docker-compose.yml's
+    # api/worker/beat services for the paired `extra_hosts:
+    # host.docker.internal:host-gateway` + `OLLAMA_BASE_URL` env default
+    # that makes this resolve on a real Linux Docker host.
+    ollama_base_url: str | None = Field(default=None, alias="OLLAMA_BASE_URL")
+
     # populated from YAML after construction, not an env var
     yaml_config: dict[str, Any] = Field(default_factory=dict, exclude=True)
 
