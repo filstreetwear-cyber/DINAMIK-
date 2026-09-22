@@ -161,6 +161,19 @@ class Settings(BaseSettings):
     # that makes this resolve on a real Linux Docker host.
     ollama_base_url: str | None = Field(default=None, alias="OLLAMA_BASE_URL")
 
+    # 2026-09-22 (ops dashboard requirement): a shared secret protecting
+    # every /jobs, /brands, /opportunities, /ai-claims, /weekly-scans
+    # endpoint (see app/main.py's require_dashboard_key dependency).
+    # Left unset (the default everywhere except a real deploy where this
+    # is explicitly configured), the API stays exactly as open as it was
+    # before this field existed -- same "no-op until set" shape as
+    # ollama_base_url/browser_executable_path above. This is a single
+    # shared value, not per-user auth: adequate for "keep randoms on the
+    # public internet from hitting POST /jobs", not a real authentication
+    # system -- see docs/architecture.md's addendum for what that would
+    # take and why it's explicitly out of scope here.
+    dashboard_api_key: str | None = Field(default=None, alias="DASHBOARD_API_KEY")
+
     # populated from YAML after construction, not an env var
     yaml_config: dict[str, Any] = Field(default_factory=dict, exclude=True)
 

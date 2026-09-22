@@ -1404,3 +1404,76 @@ check app/ tests/` e `mypy app/` puliti dopo le modifiche.
 `docker compose config` validato in sintassi (nessun demone
 disponibile per una validazione runtime). Nessuna migrazione Alembic
 necessaria (nessuna modifica di schema in questa pass).
+
+## Addendum (23) — 22/09: API read surface per l'ops dashboard
+
+**Perché**: Fil ha chiesto una dashboard per "gestire gli agenti,
+vedere le analisi" — non il sito vetrina costruito subito prima
+(quello resta un progetto separato, `dinamik-advisor-site`, senza
+alcuna dipendenza da questo repo). Controllando `app/main.py` prima di
+scrivere qualunque frontend: l'API reale (Milestone 13) esponeva solo
+4 endpoint — `/health`, `POST /jobs`, `GET /jobs`, `GET /brands` — che
+mirror-ano 1:1 comandi CLI già esistenti, per design (vedi il
+docstring originale del file, che elenca esplicitamente perché
+endpoint per "prospects"/"agent runs" NON esistono: sarebbero superficie
+inventata senza un comando CLI a provarne il bisogno). Opportunities,
+AI claims e Weekly Scan non erano raggiungibili via HTTP — solo dentro
+il DB o via CLI (`dinamik scan status`/`scan history`).
+
+**Cosa è stato aggiunto** (`app/main.py`, `app/schemas/api.py`,
+`app/core/config.py`):
+
+- `GET /weekly-scans`, `GET /weekly-scans/latest`, `GET
+  /weekly-scans/{id}` — mirror diretto di `dinamik scan
+  history`/`scan status`, stesso pattern già usato per `/brands`.
+  Nessuna logica nuova.
+- `GET /opportunities` (filtrabile per `brand_id`/`opportunity_type`/
+  `level`) e `GET /ai-claims` (filtrabile per `brand_id`) — **questi
+  due non hanno alcun precedente CLI**: prima d'ora nessun comando
+  elencava opportunities o AI claims come liste indipendenti, solo
+  conteggi dentro la risposta sincrona di `POST /jobs`. Aggiunti
+  perché Fil li ha esplicitamente richiesti per la dashboard — stessa
+  logica con cui il Weekly Scan stesso fu aggiunto fuori sequenza il
+  21/09: un requisito dichiarato, non scope inventato di iniziativa.
+- `DASHBOARD_API_KEY` (nuovo campo `Settings`, vuoto di default =
+  comportamento identico a prima) + dipendenza
+  `require_dashboard_key` applicata a tutti gli endpoint tranne
+  `/health`. Confronto a stringa singola su header
+  `X-Dashboard-Key` — un segreto condiviso, **non** un sistema di
+  autenticazione utenti reale (niente sessioni, niente utenti
+  distinti, niente scadenza). Sufficiente per tenere fuori chi trova
+  l'IP pubblico della VPS per caso; non sufficiente se in futuro
+  Dinamik Advisor avrà più persone con permessi diversi — quello
+  richiederebbe un vero sistema di auth, fuori scope qui.
+- `CORSMiddleware` con `allow_origins=["*"]` — la dashboard gira su
+  un'origine diversa dall'API (porta diversa, in futuro forse dominio
+  diverso). Aperto perché la protezione reale è la API key sopra, non
+  il CORS; restringere a un'origine specifica è una modifica di una
+  riga quando la dashboard avrà un URL di produzione fisso.
+
+**Verifica eseguita**: 13 test nuovi in `tests/test_main.py` (7 sui
+nuovi endpoint di lettura — opportunities/ai-claims/weekly-scans,
+inclusi i casi vuoti e i 404; 6 sulla dipendenza di auth — aperto di
+default, 401 su chiave mancante/errata, 200 su chiave corretta,
+`/health` sempre aperto anche a chiave impostata). Ambiente
+ricostruito da zero in questa pass (container senza `.venv`
+preesistente — reinstallato con `pip install -e ".[dev]"`, Postgres
+locale riavviato con `service postgresql start`). Suite completa:
+**284 passati, 2 saltati, 0 falliti** (baseline 271/2 + 13 nuovi test,
+nessuna regressione). `ruff check .` pulito. `mypy app tests`: 2
+errori preesistenti in `tests/test_ai_provider.py`
+(`"AIProvider" has no attribute "_base_url"`) non toccati da questa
+pass — file non modificato, non causati da queste modifiche; non
+corretti qui per non allargare lo scope, segnalati per completezza.
+Nessuna migrazione Alembic (nessuna modifica di schema — Opportunity/
+AIClaim/WeeklyScan sono letti, non modificati).
+
+**Cosa NON è stato fatto**: nessun endpoint di scrittura oltre
+`POST /jobs` (già esistente); nessuna paginazione/cursor sui nuovi
+endpoint (limit semplice, sufficiente per una vista umana, non
+un'API general-purpose); nessuna rimozione/rotazione della
+`DASHBOARD_API_KEY` (va gestita manualmente); il campo `report_path`
+di `WeeklyScanItem` espone solo il percorso su disco del report
+markdown, non il suo contenuto — leggerlo via HTTP richiederebbe un
+endpoint dedicato, non costruito qui perché non richiesto per la v1
+della dashboard.

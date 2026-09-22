@@ -193,3 +193,134 @@ def test_list_brands_empty_when_table_is_empty(client: TestClient):
     response = client.get("/brands")
     assert response.status_code == 200
     assert response.json() == []
+
+
+# --- 2026-09-22: ops dashboard requirement ---------------------------------
+
+
+def test_list_opportunities_shows_opportunities_created_by_post_jobs(client: TestClient):
+    client.post("/jobs", json={"name": "api-test-job-for-opps", "marketplace": "IT"})
+
+    response = client.get("/opportunities")
+    assert response.status_code == 200
+    body = response.json()
+    assert len(body) >= 1
+    assert "brand_name" in body[0]
+    assert "opportunity_type" in body[0]
+    assert "level" in body[0]
+
+
+def test_list_opportunities_filters_by_brand_id(client: TestClient):
+    client.post("/jobs", json={"name": "api-test-job-for-opps-filter", "marketplace": "IT"})
+    brand_id = client.get("/brands").json()[0]["id"]
+
+    response = client.get("/opportunities", params={"brand_id": brand_id})
+    assert response.status_code == 200
+    assert all(row["brand_id"] == brand_id for row in response.json())
+
+
+def test_list_opportunities_empty_when_table_is_empty(client: TestClient):
+    response = client.get("/opportunities")
+    assert response.status_code == 200
+    assert response.json() == []
+
+
+def test_list_ai_claims_filters_by_brand_id(client: TestClient):
+    client.post("/jobs", json={"name": "api-test-job-for-claims", "marketplace": "IT"})
+    brand_id = client.get("/brands").json()[0]["id"]
+
+    response = client.get("/ai-claims", params={"brand_id": brand_id})
+    assert response.status_code == 200
+    # AI analysis needs a reachable Ollama, absent in this sandbox -- the
+    # real, honest assertion here is "the endpoint works and filters
+    # correctly", not "a claim was produced" (see test_main.py's own
+    # module docstring on ErrorLog rows from this same cause).
+    assert all(row["entity_id"] == str(brand_id) for row in response.json())
+
+
+def test_list_ai_claims_empty_when_table_is_empty(client: TestClient):
+    response = client.get("/ai-claims")
+    assert response.status_code == 200
+    assert response.json() == []
+
+
+def test_weekly_scans_latest_404s_when_none_have_run(client: TestClient):
+    response = client.get("/weekly-scans/latest")
+    assert response.status_code == 404
+
+
+def test_weekly_scan_by_id_404s_for_unknown_id(client: TestClient):
+    response = client.get("/weekly-scans/00000000-0000-0000-0000-000000000000")
+    assert response.status_code == 404
+
+
+def test_list_weekly_scans_empty_when_table_is_empty(client: TestClient):
+    response = client.get("/weekly-scans")
+    assert response.status_code == 200
+    assert response.json() == []
+
+
+# --- dashboard auth (DASHBOARD_API_KEY) ------------------------------------
+#
+# `settings` in app/main.py is bound once at import time (same "one
+# process, one Settings instance" fact test_workers.py's own
+# test_configure_beat_schedule... test already documents for
+# app/workers/celery_app.py) -- monkeypatching the env var does nothing
+# after import. These tests patch app.main.settings.dashboard_api_key
+# directly, the actual object require_dashboard_key reads, and restore it
+# in a finally so later tests in this module see the real (unset) default.
+
+
+def test_endpoints_open_when_dashboard_api_key_unset(client: TestClient):
+    from app.main import settings as main_settings
+
+    assert main_settings.dashboard_api_key is None  # the default this whole file already relies on
+    response = client.get("/jobs")
+    assert response.status_code == 200
+
+
+def test_endpoints_reject_missing_key_when_dashboard_api_key_set(client: TestClient):
+    from app.main import settings as main_settings
+
+    main_settings.dashboard_api_key = "test-secret"
+    try:
+        response = client.get("/jobs")
+        assert response.status_code == 401
+    finally:
+        main_settings.dashboard_api_key = None
+
+
+def test_endpoints_reject_wrong_key_when_dashboard_api_key_set(client: TestClient):
+    from app.main import settings as main_settings
+
+    main_settings.dashboard_api_key = "test-secret"
+    try:
+        response = client.get("/jobs", headers={"X-Dashboard-Key": "wrong"})
+        assert response.status_code == 401
+    finally:
+        main_settings.dashboard_api_key = None
+
+
+def test_endpoints_accept_correct_key_when_dashboard_api_key_set(client: TestClient):
+    from app.main import settings as main_settings
+
+    main_settings.dashboard_api_key = "test-secret"
+    try:
+        response = client.get("/jobs", headers={"X-Dashboard-Key": "test-secret"})
+        assert response.status_code == 200
+    finally:
+        main_settings.dashboard_api_key = None
+
+
+def test_health_stays_open_even_when_dashboard_api_key_set(client: TestClient):
+    """/health is deliberately excluded from require_dashboard_key (see
+    app/main.py) -- infra/uptime checks shouldn't need the dashboard
+    secret, and it reveals nothing sensitive."""
+    from app.main import settings as main_settings
+
+    main_settings.dashboard_api_key = "test-secret"
+    try:
+        response = client.get("/health")
+        assert response.status_code == 200
+    finally:
+        main_settings.dashboard_api_key = None

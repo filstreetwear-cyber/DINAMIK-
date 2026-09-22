@@ -109,3 +109,87 @@ class BrandListItem(BaseModel):
     id: uuid.UUID
     name: str
     scores: dict[str, float]
+
+
+# --- 2026-09-22: ops dashboard requirement -----------------------------
+#
+# The four schemas/endpoints below (Opportunity, AIClaim, WeeklyScan x2)
+# are genuinely NEW read surface, unlike everything above this line --
+# this file's own module docstring is explicit that Milestone 13's original
+# four endpoints mirror an existing CLI command 1:1, and this project has
+# deliberately avoided inventing API surface beyond that precedent before
+# now (see app/main.py's docstring on why no "prospects"/"agent runs"
+# endpoints exist). WeeklyScan is the one exception that stays close to
+# that precedent -- `dinamik scan status`/`scan history` already print
+# every field below, this just mirrors them over HTTP the same way
+# GET /brands mirrors `dinamik brands list`. Opportunity and AIClaim have
+# NO CLI precedent at all: nothing today lists opportunities or AI claims
+# standalone, only nested inside a job's synchronous POST /jobs response
+# (counts only) or a brand's `reasons`/`evidence_ids` JSON. These two are
+# added because Fil explicitly asked for an ops dashboard that shows
+# "opportunities" and "AI analyses" as first-class, browsable things --
+# the same kind of explicit, stated requirement that justified adding the
+# Weekly Scan feature out-of-sequence on 2026-09-21, not scope invented on
+# this session's own initiative.
+
+
+class OpportunityListItem(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+
+    id: uuid.UUID
+    created_at: datetime
+    brand_id: uuid.UUID
+    opportunity_type: str
+    level: str
+    rule_triggered: str
+    reasons: list
+
+
+class OpportunityListItemWithBrand(OpportunityListItem):
+    brand_name: str
+
+
+class AIClaimListItem(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+
+    id: uuid.UUID
+    created_at: datetime
+    entity_type: str
+    entity_id: str
+    claim: str
+    data_type: str
+    confidence: float
+    reasoning_summary: str
+    evidence_ids: list
+    model: str
+    provider: str
+    generated_at: datetime
+
+
+class WeeklyScanItem(BaseModel):
+    """Same field set `dinamik scan status`/`scan history` already print
+    (app/cli.py) -- used for both the list and the single-scan response,
+    same "one shape, two endpoints" pattern JobListItem already uses for
+    GET /jobs and GET /jobs/{job_id}."""
+
+    model_config = ConfigDict(from_attributes=True)
+
+    id: uuid.UUID
+    period_start: datetime
+    period_end: datetime
+    status: str
+    started_at: datetime | None
+    completed_at: datetime | None
+    research_job_id: uuid.UUID | None
+    universe_size: int
+    evidence_created: int
+    changes_detected: int
+    changes_significant: int
+    opportunities_new: int
+    opportunities_improving: int
+    opportunities_deteriorating: int
+    opportunities_resolved: int
+    opportunities_continuing: int
+    errors: list
+    metrics: dict
+    report_path: str | None

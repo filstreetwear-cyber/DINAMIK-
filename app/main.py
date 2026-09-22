@@ -50,16 +50,18 @@ from __future__ import annotations
 
 import uuid
 
-from fastapi import Depends, FastAPI, HTTPException
+from fastapi import Depends, FastAPI, Header, HTTPException, Query
+from fastapi.middleware.cors import CORSMiddleware
 from sqlalchemy import select, text
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.ai.bootstrap import build_default_ai_gateway
 from app.core.config import get_settings
 from app.database.session import get_session
-from app.models import Brand, ResearchJob, Score
+from app.models import AIClaim, Brand, Opportunity, ResearchJob, Score, WeeklyScan
 from app.schemas.api import (
     AIAnalysisStageResult,
+    AIClaimListItem,
     BrandDeduplicationStageResult,
     BrandListItem,
     BrandResolutionStageResult,
@@ -69,7 +71,9 @@ from app.schemas.api import (
     JobListItem,
     JobRunResponse,
     OpportunityEngineStageResult,
+    OpportunityListItemWithBrand,
     ScoringEngineStageResult,
+    WeeklyScanItem,
 )
 from app.services.pipeline_orchestrator import run_research_pipeline
 
@@ -79,6 +83,37 @@ app = FastAPI(
     title="Dinamik Advisor — Amazon Intelligence Platform",
     version="0.1.0",
 )
+
+# 2026-09-22 (ops dashboard requirement): the dashboard is a separate
+# static site, served from a different origin than this API (different
+# port at minimum, possibly a different host once a real domain exists)
+# -- the browser enforces CORS regardless of what's actually running on
+# the same VPS. Wide open (`allow_origins=["*"]`) is deliberate for now:
+# every response behind these routes is already gated by
+# require_dashboard_key below once DASHBOARD_API_KEY is set, so the CORS
+# policy's job here is just "let a browser call this API from anywhere",
+# not a second layer of access control. Tightening this to a specific
+# origin is a one-line change once the dashboard has a real deployed URL.
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=["*"],
+    allow_methods=["GET", "POST"],
+    allow_headers=["*"],
+)
+
+
+async def require_dashboard_key(x_dashboard_key: str | None = Header(default=None)) -> None:
+    """No-op when DASHBOARD_API_KEY is unset (default everywhere except a
+    real deploy that configures it) -- same "open until explicitly
+    configured" shape as every other optional Settings field in this
+    project. When set, every dependent endpoint requires an exact match
+    on the X-Dashboard-Key header. This is a single shared secret, not
+    per-user auth -- see Settings.dashboard_api_key's own comment for
+    what it is and isn't."""
+    if not settings.dashboard_api_key:
+        return
+    if x_dashboard_key != settings.dashboard_api_key:
+        raise HTTPException(status_code=401, detail="missing or invalid X-Dashboard-Key header")
 
 
 @app.get("/health", response_model=HealthResponse)
@@ -110,7 +145,9 @@ async def health(session: AsyncSession = Depends(get_session)) -> HealthResponse
 
 @app.post("/jobs", response_model=JobRunResponse, status_code=201)
 async def create_job(
-    payload: JobCreateRequest, session: AsyncSession = Depends(get_session)
+    payload: JobCreateRequest,
+    session: AsyncSession = Depends(get_session),
+    _key: None = Depends(require_dashboard_key),
 ) -> JobRunResponse:
     """Creates a ResearchJob and runs the full Milestone 11 pipeline
     against it synchronously, then commits — same contract, same
@@ -166,7 +203,9 @@ async def create_job(
 
 @app.get("/jobs", response_model=list[JobListItem])
 async def list_jobs(
-    limit: int = 20, session: AsyncSession = Depends(get_session)
+    limit: int = 20,
+    session: AsyncSession = Depends(get_session),
+    _key: None = Depends(require_dashboard_key),
 ) -> list[ResearchJob]:
     """HTTP equivalent of `dinamik jobs list`."""
     rows = (
@@ -179,7 +218,10 @@ async def list_jobs(
 
 @app.get("/brands", response_model=list[BrandListItem])
 async def list_brands(
-    limit: int = 20, status: str = "ACTIVE", session: AsyncSession = Depends(get_session)
+    limit: int = 20,
+    status: str = "ACTIVE",
+    session: AsyncSession = Depends(get_session),
+    _key: None = Depends(require_dashboard_key),
 ) -> list[BrandListItem]:
     """HTTP equivalent of `dinamik brands list` — each brand's most recent
     Score per score_type, read-only, purely for display (same caveat as
@@ -216,7 +258,11 @@ async def list_brands(
 
 
 @app.get("/jobs/{job_id}", response_model=JobListItem)
-async def get_job(job_id: uuid.UUID, session: AsyncSession = Depends(get_session)) -> ResearchJob:
+async def get_job(
+    job_id: uuid.UUID,
+    session: AsyncSession = Depends(get_session),
+    _key: None = Depends(require_dashboard_key),
+) -> ResearchJob:
     """Not mirrored from any CLI command -- the one genuinely new read
     endpoint in this milestone, added because REST callers (unlike a
     terminal user re-running `jobs list`) need a way to fetch a single job
@@ -227,3 +273,110 @@ async def get_job(job_id: uuid.UUID, session: AsyncSession = Depends(get_session
     if job is None:
         raise HTTPException(status_code=404, detail="research job not found")
     return job
+
+
+# --- 2026-09-22: ops dashboard requirement -------------------------------
+# See app/schemas/api.py's own comment on this same date for why these
+# four endpoints are new read surface rather than a CLI mirror.
+
+
+@app.get("/opportunities", response_model=list[OpportunityListItemWithBrand])
+async def list_opportunities(
+    brand_id: uuid.UUID | None = None,
+    opportunity_type: str | None = None,
+    level: str | None = None,
+    limit: int = Query(default=50, gt=0, le=500),
+    session: AsyncSession = Depends(get_session),
+    _key: None = Depends(require_dashboard_key),
+) -> list[OpportunityListItemWithBrand]:
+    """No pagination cursor, no sort option beyond newest-first -- this is
+    a browse view for a human, not a general-purpose list API; add those
+    only if the dashboard actually needs them."""
+    stmt = select(Opportunity, Brand.name).join(Brand, Opportunity.brand_id == Brand.id)
+    if brand_id is not None:
+        stmt = stmt.where(Opportunity.brand_id == brand_id)
+    if opportunity_type is not None:
+        stmt = stmt.where(Opportunity.opportunity_type == opportunity_type)
+    if level is not None:
+        stmt = stmt.where(Opportunity.level == level)
+    stmt = stmt.order_by(Opportunity.created_at.desc()).limit(limit)
+
+    rows = (await session.execute(stmt)).all()
+    return [
+        OpportunityListItemWithBrand(
+            id=opp.id,
+            created_at=opp.created_at,
+            brand_id=opp.brand_id,
+            brand_name=brand_name,
+            opportunity_type=opp.opportunity_type,
+            level=opp.level,
+            rule_triggered=opp.rule_triggered,
+            reasons=opp.reasons,
+        )
+        for opp, brand_name in rows
+    ]
+
+
+@app.get("/ai-claims", response_model=list[AIClaimListItem])
+async def list_ai_claims(
+    brand_id: uuid.UUID | None = None,
+    limit: int = Query(default=50, gt=0, le=500),
+    session: AsyncSession = Depends(get_session),
+    _key: None = Depends(require_dashboard_key),
+) -> list[AIClaim]:
+    """`app/services/ai_analysis_engine.py` only ever writes
+    entity_type="brand" (see AIClaim's own docstring) -- entity_type isn't
+    exposed as a filter here because there is nothing else to filter it
+    to yet; add it if/when a second entity_type is ever written."""
+    stmt = select(AIClaim).where(AIClaim.entity_type == "brand")
+    if brand_id is not None:
+        stmt = stmt.where(AIClaim.entity_id == str(brand_id))
+    stmt = stmt.order_by(AIClaim.created_at.desc()).limit(limit)
+
+    rows = (await session.execute(stmt)).scalars().all()
+    return list(rows)
+
+
+@app.get("/weekly-scans", response_model=list[WeeklyScanItem])
+async def list_weekly_scans(
+    limit: int = Query(default=10, gt=0, le=200),
+    session: AsyncSession = Depends(get_session),
+    _key: None = Depends(require_dashboard_key),
+) -> list[WeeklyScan]:
+    """HTTP equivalent of `dinamik scan history`."""
+    rows = (
+        (await session.execute(select(WeeklyScan).order_by(WeeklyScan.period_end.desc()).limit(limit)))
+        .scalars()
+        .all()
+    )
+    return list(rows)
+
+
+@app.get("/weekly-scans/latest", response_model=WeeklyScanItem)
+async def get_latest_weekly_scan(
+    session: AsyncSession = Depends(get_session),
+    _key: None = Depends(require_dashboard_key),
+) -> WeeklyScan:
+    """HTTP equivalent of `dinamik scan status`. Declared BEFORE
+    GET /weekly-scans/{scan_id} below on purpose -- FastAPI matches routes
+    in declaration order, and "latest" would otherwise be swallowed by the
+    {scan_id} path parameter and fail UUID parsing instead of resolving to
+    this endpoint."""
+    scan = (
+        await session.execute(select(WeeklyScan).order_by(WeeklyScan.period_end.desc()).limit(1))
+    ).scalar_one_or_none()
+    if scan is None:
+        raise HTTPException(status_code=404, detail="no weekly scans have run yet")
+    return scan
+
+
+@app.get("/weekly-scans/{scan_id}", response_model=WeeklyScanItem)
+async def get_weekly_scan(
+    scan_id: uuid.UUID,
+    session: AsyncSession = Depends(get_session),
+    _key: None = Depends(require_dashboard_key),
+) -> WeeklyScan:
+    scan = await session.get(WeeklyScan, scan_id)
+    if scan is None:
+        raise HTTPException(status_code=404, detail="weekly scan not found")
+    return scan
