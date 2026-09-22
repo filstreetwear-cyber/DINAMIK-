@@ -1477,3 +1477,34 @@ di `WeeklyScanItem` espone solo il percorso su disco del report
 markdown, non il suo contenuto — leggerlo via HTTP richiederebbe un
 endpoint dedicato, non costruito qui perché non richiesto per la v1
 della dashboard.
+
+**Seguito (stessa giornata) — frontend + verifica end-to-end reale**:
+la dashboard (repo separata `dinamik-ops-dashboard`, Next.js statico)
+è stata costruita contro questa API e verificata così, non solo con
+`npm run build`: pipeline reale lanciata via CLI in MOCK_MODE
+(`pipeline run --category "Casa e cucina"`, l'unica categoria della
+fixture `fixtures/amazon_mock_products.json`) e `scan weekly`, poi
+l'API servita in locale (`uvicorn` su `127.0.0.1:8123`) e la
+dashboard puntata su di essa con Playwright: ogni pagina mostra dati
+reali (brand, opportunities, weekly scan), la creazione di un nuovo
+job dalla UI (`POST /jobs`) è stata eseguita per davvero e il
+risultato è comparso nella lista senza refresh manuale, e la
+validazione della chiave sbagliata sulla setup screen mostra
+correttamente l'errore reale del backend. AI Claims resta vuoto in
+questa verifica: Ollama non è raggiungibile in questo ambiente
+(`AI: UNAVAILABLE` nell'health check), non un difetto della
+dashboard — il suo empty state lo dichiara esplicitamente.
+
+Effetto collaterale della verifica: i comandi CLI hanno scritto dati
+veri nel DB Postgres locale di sviluppo (usato anche dalla suite di
+test, che assume un DB vuoto e fa rollback per-test ma non parte da
+uno stato pulito). Rilevato perché una `pytest -q` di controllo dopo
+la verifica del frontend è tornata con 17 fallimenti dovuti a righe
+extra non attese — nessuna riga di codice era cambiata nel
+frattempo. Il DB è stato ripulito (truncate) e la suite è tornata a
+284 passati/2 saltati/0 falliti, confermando che non c'era alcuna
+regressione: era contaminazione dei dati di test, non un bug.
+Annotato qui perché è un rischio reale per chi lavorerà su questo
+repo in futuro — lanciare comandi CLI o job dalla dashboard contro lo
+stesso Postgres usato dai test lascia righe che i test non si
+aspettano.
