@@ -43,6 +43,9 @@ opportunity_rules:
     product_count_medium_threshold: 3
     product_count_high_threshold: 8
     review_count_high_threshold: 500
+  website_opportunity:
+    min_page_speed_score_threshold: 50
+    min_seo_score_threshold: 50
 
 retry:
   network_error:

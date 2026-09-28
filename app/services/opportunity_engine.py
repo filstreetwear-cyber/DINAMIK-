@@ -7,16 +7,17 @@ evaluates whether that brand looks like a sales-worthy opportunity and
 writes `Opportunity` rows — `opportunity_type`/`level`/`rule_triggered`/
 `reasons`, per the model's own section-30 docstring.
 
-**Only two of the six `OpportunityType` values are actually implemented
-here: `AMAZON_OPPORTUNITY` and `BUSINESS_VALUE`.** `config/default.yaml`'s
-`scoring.weights` already carries an entry for all six (Milestone 9's job,
-consuming `Score` rows this module does not write) — but a weight existing
-in config for a future scoring step is not the same claim as "this
-milestone can evaluate that dimension today". The other four need data
-this pipeline genuinely does not have yet, and inventing a rule against
-data that doesn't exist would be exactly the kind of overclaimed-confidence
-shortcut this project has been careful to avoid at every prior milestone
-(see `brand_resolution.py`'s `verified` discipline, `brand_deduplication.py`'s
+**Three of the six `OpportunityType` values are implemented here:
+`AMAZON_OPPORTUNITY`, `BUSINESS_VALUE`, and (Fase 3/4, 28/09)
+`WEBSITE_OPPORTUNITY`.** `config/default.yaml`'s `scoring.weights` already
+carries an entry for all six (Milestone 9's job, consuming `Score` rows
+this module does not write) — but a weight existing in config for a
+future scoring step is not the same claim as "this milestone can evaluate
+that dimension today". The other three need data this pipeline genuinely
+does not have yet, and inventing a rule against data that doesn't exist
+would be exactly the kind of overclaimed-confidence shortcut this project
+has been careful to avoid at every prior milestone (see
+`brand_resolution.py`'s `verified` discipline, `brand_deduplication.py`'s
 two-tier merge caution):
 
 * **`LISTING_OPPORTUNITY`** needs listing content quality — bullet points,
@@ -27,24 +28,30 @@ two-tier merge caution):
   pipeline yet.
 * **`ADVERTISING_OPPORTUNITY`** needs ad-sponsorship signals
   (`AmazonListing.sponsored_seen` or real ad spend data) — same gap.
-* **`WEBSITE_OPPORTUNITY`** needs `WEBSITE_DATA` (the one real, non-mock
-  provider this project has — see `docs/providers.md`) called against a
-  discovered brand's website. Nothing wires that provider into the Amazon
-  Scout pipeline; discovery never learns a brand's website URL in the
-  first place (`Brand.website` stays `NULL` from Milestone 5 onward).
 * **`SELLER_FAST_FIT`** needs Dinamik's own fit criteria for their
   "Seller Fast" service line, which were never specified anywhere in the
   refactor document or `docs/architecture.md` — there is nothing
   deterministic to encode without guessing at Frank's actual business
   criteria, which is worse than not building it.
 
-Building placeholder rules for these four now would produce Opportunity
+Building placeholder rules for these three now would produce Opportunity
 rows that look evaluated but aren't grounded in anything — worse than not
-having them. Wiring in `WEBSITE_OPPORTUNITY` becomes real work once/if a
-brand's website gets discovered (a scope question for a future
-milestone, not a blocker for this one); `LISTING_OPPORTUNITY`/
-`ADVERTISING_OPPORTUNITY` need a new discovery capability entirely;
-`SELLER_FAST_FIT` needs Frank's actual criteria.
+having them. `LISTING_OPPORTUNITY`/`ADVERTISING_OPPORTUNITY` need a new
+discovery capability entirely; `SELLER_FAST_FIT` needs Frank's actual
+criteria.
+
+**`WEBSITE_OPPORTUNITY` is real and tested (`evaluate_website_opportunity`
+below, fed by `WebsiteIntelligenceProvider`'s `mobile_friendly`/
+`page_speed_score`/`seo_score` signals, Fase 3/4) but has NO live input
+yet, and will not fire in practice until a separate gap closes**: nothing
+in this pipeline populates `Brand.website` (discovery never learns a
+brand's website URL) or writes a `WebsiteProfile` row from the provider's
+output — `_evaluate_brand` below queries `WebsiteProfile` by `brand_id`
+and gets `None` for every brand today, so this rule always returns `None`
+(same as `evaluate_amazon_opportunity([])` for a brand with zero
+products) until that ingestion wiring is built. Flagged explicitly rather
+than left to be discovered later — the same discipline `AmazonScrapingProvider`
+followed for its own missing DB-ingestion half (see its module docstring).
 
 **`Opportunity` is treated as an append-only time series, like
 `AgentEvent`** — there's no unique constraint on `(brand_id,
@@ -57,9 +64,14 @@ milestone doesn't touch it) is built for.
 An assessed brand always gets a row per implemented type, even when the
 level is `NONE` ("checked, no signal found") — a real "we evaluated this
 and found nothing" answer, not silence, following the same principle
-`AmazonProvider._search()` uses for an empty category match. The one
-case that gets no row at all is a brand with zero linked `AmazonProduct`
-rows: there is nothing to evaluate, not even a null result.
+`AmazonProvider._search()` uses for an empty category match. A brand with
+zero linked `AmazonProduct` rows gets no `AMAZON_OPPORTUNITY`/
+`BUSINESS_VALUE` row at all -- there is nothing to evaluate, not even a
+null result -- but (Fase 3/4) it can still get a `WEBSITE_OPPORTUNITY`
+row if a `WebsiteProfile` exists for it: website quality is independent
+of whether this pipeline has any Amazon product data for that brand, so
+the two are no longer coupled the way the original two-rule version of
+this module was.
 """
 from __future__ import annotations
 
@@ -78,6 +90,7 @@ from app.models import (
     Brand,
     ErrorLog,
     Opportunity,
+    WebsiteProfile,
 )
 from app.models.enums import ErrorCategory, OpportunityLevel, OpportunityType
 
@@ -86,6 +99,8 @@ _DEFAULT_MIN_REVIEW_COUNT_THRESHOLD = 50
 _DEFAULT_PRODUCT_COUNT_MEDIUM_THRESHOLD = 3
 _DEFAULT_PRODUCT_COUNT_HIGH_THRESHOLD = 8
 _DEFAULT_REVIEW_COUNT_HIGH_THRESHOLD = 500
+_DEFAULT_MIN_PAGE_SPEED_SCORE_THRESHOLD = 50
+_DEFAULT_MIN_SEO_SCORE_THRESHOLD = 50
 
 
 @dataclass
@@ -175,6 +190,58 @@ def evaluate_business_value(
     return RuleResult(level, "product_and_review_footprint_v1", reasons)
 
 
+def evaluate_website_opportunity(website_profile: WebsiteProfile | None, settings: Settings) -> RuleResult | None:
+    """Fase 3/4 (28/09) — room-for-improvement signal from the one real,
+    non-mock provider this project has (WebsiteIntelligenceProvider):
+    a site that isn't mobile-friendly and/or scores poorly on Lighthouse's
+    performance/SEO categories is a legitimate reason to reach out with a
+    "your website is costing you sales" pitch, the same shape as
+    evaluate_amazon_opportunity's rating/review-volume signal.
+
+    Returns None only when `website_profile` is None -- no WebsiteProfile
+    row exists for this brand at all (today: every brand, see this
+    module's docstring on the missing ingestion wiring), which is a
+    distinct "never looked" outcome from "looked, found nothing" (level
+    NONE, rule "insufficient_website_data" -- mirrors
+    evaluate_amazon_opportunity's `rated_values` empty-list branch, for a
+    WebsiteProfile row that exists but has all three signal fields
+    unmeasured, e.g. because include_performance_audit was never
+    requested for that fetch)."""
+    if website_profile is None:
+        return None
+
+    cfg = settings.opportunity_rule_config("website_opportunity")
+    page_speed_threshold = int(cfg.get("min_page_speed_score_threshold", _DEFAULT_MIN_PAGE_SPEED_SCORE_THRESHOLD))
+    seo_threshold = int(cfg.get("min_seo_score_threshold", _DEFAULT_MIN_SEO_SCORE_THRESHOLD))
+
+    has_any_signal = (
+        website_profile.mobile_friendly is not None
+        or website_profile.page_speed_score is not None
+        or website_profile.seo_score is not None
+    )
+    if not has_any_signal:
+        return RuleResult(OpportunityLevel.NONE, "insufficient_website_data", [])
+
+    reasons: list[str] = []
+    if website_profile.mobile_friendly is False:
+        reasons.append("mobile_friendly=False -- no responsive viewport detected")
+    if website_profile.page_speed_score is not None and website_profile.page_speed_score < page_speed_threshold:
+        reasons.append(
+            f"page_speed_score={website_profile.page_speed_score} is below threshold {page_speed_threshold}"
+        )
+    if website_profile.seo_score is not None and website_profile.seo_score < seo_threshold:
+        reasons.append(f"seo_score={website_profile.seo_score} is below threshold {seo_threshold}")
+
+    if len(reasons) >= 2:
+        level = OpportunityLevel.HIGH
+    elif len(reasons) == 1:
+        level = OpportunityLevel.MEDIUM
+    else:
+        level = OpportunityLevel.NONE
+
+    return RuleResult(level, "mobile_and_performance_signals_v1", reasons)
+
+
 @dataclass
 class BrandOpportunityOutcome:
     brand_id: uuid.UUID
@@ -206,12 +273,16 @@ async def _evaluate_brand(
         .scalars()
         .all()
     )
+    website_profile = (
+        await session.execute(select(WebsiteProfile).where(WebsiteProfile.brand_id == brand.id))
+    ).scalar_one_or_none()
 
     outcome = BrandOpportunityOutcome(brand_id=brand.id)
 
     for opportunity_type, rule_result in (
         (OpportunityType.AMAZON, evaluate_amazon_opportunity(list(products), settings)),
         (OpportunityType.BUSINESS_VALUE, evaluate_business_value(list(products), list(sellers), settings)),
+        (OpportunityType.WEBSITE, evaluate_website_opportunity(website_profile, settings)),
     ):
         if rule_result is None:
             continue  # no products at all -- nothing to evaluate for this brand
@@ -250,8 +321,8 @@ async def run_opportunity_engine(
     """Evaluates up to `max_brands` ACTIVE Brand rows (MERGED brands --
     Milestone 7 -- are excluded: their children were already repointed to
     a canonical, so evaluating the dead row again would be evaluating
-    stale data) and writes Opportunity rows for AMAZON_OPPORTUNITY and
-    BUSINESS_VALUE. Meant to be called repeatedly (a future scheduler,
+    stale data) and writes Opportunity rows for AMAZON_OPPORTUNITY,
+    BUSINESS_VALUE, and WEBSITE_OPPORTUNITY. Meant to be called repeatedly (a future scheduler,
     Milestone 14) the same way resolve_research_job/run_brand_deduplication
     are -- `summary.truncated` says whether this call saw every ACTIVE
     brand.

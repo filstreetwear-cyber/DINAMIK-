@@ -89,6 +89,22 @@ def parse_website_html(html: str) -> dict[str, Any]:
     has_chatbot = any(needle in lowered for needle in _CHATBOT_SIGNATURES)
     has_search = any(needle in lowered for needle in _SEARCH_SIGNATURES)
 
+    # Fase 3/4 (28/09): the same "responsive viewport" check Google's own
+    # now-retired Mobile-Friendly Test used as its primary signal — a
+    # missing/absent viewport meta tag reliably means desktop-only CSS,
+    # since every modern responsive framework (Bootstrap, Tailwind, every
+    # theme system in _TECHNOLOGY_SIGNATURES) injects one. It is still a
+    # heuristic (a page COULD declare the tag and still render badly on a
+    # phone) — provider.py marks this INFERENCE, same as technology/chatbot,
+    # never FACT.
+    viewport_tag = soup.find("meta", attrs={"name": "viewport"})
+    # .get("content") is typed str | AttributeValueList by the bs4 stubs
+    # (a handful of attrs, e.g. "class", can be multi-valued) -- viewport's
+    # content is always a single string in practice, but str() keeps mypy
+    # honest without assuming that at the type level.
+    viewport_content = str(viewport_tag.get("content") or "") if viewport_tag else ""
+    mobile_friendly = "width=device-width" in viewport_content.replace(" ", "").lower()
+
     return {
         "technology": technology.value,
         "generator_meta_tag": generator_content,
@@ -96,4 +112,5 @@ def parse_website_html(html: str) -> dict[str, Any]:
         "meta_description": meta_description,
         "has_chatbot": has_chatbot,
         "has_search": has_search,
+        "mobile_friendly": mobile_friendly,
     }

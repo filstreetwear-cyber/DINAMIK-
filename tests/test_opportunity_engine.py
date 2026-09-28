@@ -29,12 +29,14 @@ from app.models import (
     ErrorLog,
     Opportunity,
     ResearchJob,
+    WebsiteProfile,
 )
 from app.models.enums import OpportunityLevel, OpportunityType
 from app.services.brand_resolution import resolve_research_job
 from app.services.opportunity_engine import (
     evaluate_amazon_opportunity,
     evaluate_business_value,
+    evaluate_website_opportunity,
     run_opportunity_engine,
 )
 from app.tools.amazon.provider import AmazonProvider
@@ -142,6 +144,81 @@ def test_business_value_notes_multi_seller_presence():
 
 
 # ---------------------------------------------------------------------------
+# evaluate_website_opportunity (Fase 3/4, 28/09) -- pure unit tests
+# ---------------------------------------------------------------------------
+
+
+def _website_profile(**overrides: Any) -> WebsiteProfile:
+    defaults: dict[str, Any] = {
+        "domain": "example.test",
+        "mobile_friendly": None,
+        "page_speed_score": None,
+        "seo_score": None,
+    }
+    defaults.update(overrides)
+    return WebsiteProfile(**defaults)
+
+
+def test_website_opportunity_returns_none_for_no_profile():
+    settings = get_settings()
+    assert evaluate_website_opportunity(None, settings) is None
+
+
+def test_website_opportunity_insufficient_data_when_no_signals_measured():
+    settings = get_settings()
+    result = evaluate_website_opportunity(_website_profile(), settings)
+    assert result is not None
+    assert result.level == OpportunityLevel.NONE
+    assert result.rule_triggered == "insufficient_website_data"
+    assert result.reasons == []
+
+
+def test_website_opportunity_medium_from_mobile_friendly_alone():
+    settings = get_settings()
+    result = evaluate_website_opportunity(
+        _website_profile(mobile_friendly=False, page_speed_score=80, seo_score=80), settings
+    )
+    assert result is not None
+    assert result.level == OpportunityLevel.MEDIUM
+    assert len(result.reasons) == 1
+    assert "mobile_friendly" in result.reasons[0]
+
+
+def test_website_opportunity_high_when_two_reasons_trigger():
+    settings = get_settings()
+    result = evaluate_website_opportunity(
+        _website_profile(mobile_friendly=False, page_speed_score=20, seo_score=90), settings
+    )
+    assert result is not None
+    assert result.level == OpportunityLevel.HIGH
+    assert len(result.reasons) == 2
+
+
+def test_website_opportunity_none_level_when_all_signals_are_healthy():
+    settings = get_settings()
+    result = evaluate_website_opportunity(
+        _website_profile(mobile_friendly=True, page_speed_score=95, seo_score=92), settings
+    )
+    assert result is not None
+    assert result.level == OpportunityLevel.NONE
+    assert result.rule_triggered == "mobile_and_performance_signals_v1"
+    assert result.reasons == []
+
+
+def test_website_opportunity_unmeasured_mobile_friendly_adds_no_reason():
+    """mobile_friendly=None (nessun HTML mai analizzato, o segnale non
+    ancora calcolato) e' diverso da False -- non deve mai contare come
+    'non mobile-friendly'."""
+    settings = get_settings()
+    result = evaluate_website_opportunity(
+        _website_profile(mobile_friendly=None, page_speed_score=90, seo_score=90), settings
+    )
+    assert result is not None
+    assert result.level == OpportunityLevel.NONE
+    assert result.reasons == []
+
+
+# ---------------------------------------------------------------------------
 # DB-backed tests
 # ---------------------------------------------------------------------------
 
@@ -239,6 +316,34 @@ async def test_run_creates_opportunity_rows_for_a_brand_with_products(session: A
     )
     assert len(events) == 2
     assert all(e.event_type == "opportunity_created" for e in events)
+
+
+@pytest.mark.asyncio
+async def test_run_wires_website_opportunity_when_a_website_profile_exists(session: AsyncSession):
+    """Fase 3/4: confirms _evaluate_brand actually queries WebsiteProfile
+    by brand_id and feeds it to evaluate_website_opportunity -- not just
+    that the pure function works in isolation (covered above)."""
+    brand = await _brand_with_products(session, "WebOppo", n_products=1)
+    session.add(
+        WebsiteProfile(brand_id=brand.id, domain="weboppo.test", mobile_friendly=False, page_speed_score=90)
+    )
+    await session.flush()
+
+    summary = await run_opportunity_engine(session)
+
+    assert summary.opportunities_created == 3  # AMAZON + BUSINESS_VALUE + WEBSITE
+
+    opportunities = (
+        (await session.execute(select(Opportunity).where(Opportunity.brand_id == brand.id)))
+        .scalars()
+        .all()
+    )
+    types = {o.opportunity_type for o in opportunities}
+    assert types == {OpportunityType.AMAZON.value, OpportunityType.BUSINESS_VALUE.value, OpportunityType.WEBSITE.value}
+
+    website_opp = next(o for o in opportunities if o.opportunity_type == OpportunityType.WEBSITE.value)
+    assert website_opp.level == OpportunityLevel.MEDIUM.value
+    assert any("mobile_friendly" in r for r in website_opp.reasons)
 
 
 @pytest.mark.asyncio

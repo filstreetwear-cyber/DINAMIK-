@@ -1508,3 +1508,103 @@ Annotato qui perché è un rischio reale per chi lavorerà su questo
 repo in futuro — lanciare comandi CLI o job dalla dashboard contro lo
 stesso Postgres usato dai test lascia righe che i test non si
 aspettano.
+
+## Addendum (24) — 28/09: nuova direzione — lead-gen scouting a budget zero (Fase 0-2 retroattivo + Fase 3/4)
+
+**Perché un nuovo obiettivo, non una milestone del piano originale**:
+Fil ha bloccato l'accesso Helium10 (condiviso con un socio di Frank) e ha
+ridefinito l'obiettivo del progetto: non solo assegnare un punteggio a
+brand già scoperti via le fixture mock, ma scoprire attivamente venditori
+Amazon.it reali che non convertono, con un sito/store debole, per
+contattarli — a costo marginale zero (niente abbonamenti; qualche euro di
+VPS è accettabile). Architettura concordata: adapter intercambiabili
+sotto un'interfaccia stabile (`ScrapingAdapter`), così un motore che si
+rompe (ban, cambio di markup) si sostituisce senza toccare il resto della
+pipeline.
+
+**Fase 0 (verifica strumenti, non eseguibile da questa sandbox)**: script
+di benchmark consegnato a Fil/VPS (`phase0_benchmark_amazon_it.py`) — non
+lanciabile qui perché il proxy dell'organizzazione blocca esplicitamente
+`www.amazon.it` (403 di policy) e nessun device utente era collegato alla
+sessione in quel momento.
+
+**Fase 1 (scelta motore)**: valutati `drawrowfly/amazon-product-api`
+(scartato: stale da nov 2022, ricerca rotta secondo test indipendenti) e
+`theonlyanil/amzpy` (MIT, gratuito). Verificato **leggendo il sorgente
+vero di amzpy**, non la doc: `amzpy.parser` non estrae in nessun punto
+nome/ID/URL del venditore — solo il badge "Best Seller". Confermato anche
+con un test che passa HTML sintetico contenente marcatori seller reali
+(`#merchant-info`, `#sellerProfileTriggerId`) al parser vero e verifica
+che li ignori. `browser-act` (commerciale) dichiara supporto seller ma
+resta a licenza a pagamento oltre il free tier one-time — non adottato
+ora, candidato per un adapter futuro se/quando serve davvero il dato
+seller.
+
+**Fase 2 — `AmazonScrapingProvider`/`AmzPyAdapter`** (commit `4b22f55`,
+`app/tools/amazon_scraping/`): provider reale (non fixture) per
+`PRODUCT_SEARCH`/`PRODUCT_DATA`, che dichiara `SELLER_DATA` **non
+supportata** finché nessun adapter verificato la fornisce davvero — mai
+un campo seller inventato. 12 test nuovi, incluso quello col parser vero
+sopra citato. **Gap noto, non chiuso qui**: nessuna logica che scrive i
+risultati dello scraping in `Brand`/`AmazonProduct`/`AmazonSeller` — il
+provider esiste ed è testato, ma non è ancora agganciato a una pipeline
+di ingestion. Da fare in una fase successiva, insieme al gap gemello di
+Fase 3/4 sotto.
+
+**Fase 3/4 — Website Intelligence: mobile/performance + regola
+`WEBSITE_OPPORTUNITY`**:
+
+1. `mobile_friendly` (`app/tools/website/html_parser.py`): stesso segnale
+   primario usato dal (defunto) Mobile-Friendly Test di Google — presenza
+   di `<meta name="viewport" content="width=device-width...">`. Zero
+   costo aggiuntivo (stesso HTML già scaricato per technology/chatbot),
+   quindi sempre incluso, `DataType.INFERENCE` come gli altri segnali
+   euristici del provider.
+
+2. `page_speed_score`/`seo_score` (`app/tools/website/performance_auditor.py`,
+   `LighthousePerformanceAuditor`): CLI Lighthouse reale (Google, MIT,
+   gratuita — `npm install -g lighthouse`), non una stima. **Verificato
+   dal vivo in questa sandbox**, non solo dichiarato: registry.npmjs.org
+   è nell'allowlist del proxy (a differenza di amazon.it/qualunque sito
+   esterno generico, bloccati); lanciato un vero server HTTP su
+   `127.0.0.1` (loopback, non attraversa il proxy) e un vero audit
+   Lighthouse contro di esso col Chromium già preinstallato
+   (`/opt/pw-browsers/chromium`, stesso binario già usato dal browser
+   tier di `WebsiteIntelligenceProvider`) — letto il vero `report.json`
+   prodotto per costruire il parsing, testato anche il percorso di
+   fallimento (URL irraggiungibile → `runtimeError` valorizzato,
+   `categories.*.score` = `None`). Un test della suite (skip automatico
+   se `lighthouse` non è installato sulla macchina) lancia questo stesso
+   audit reale, non uno stub — **passato qui**. Deliberatamente **opt-in**
+   (`fetch(..., include_performance_audit=True)`, mai di default): un
+   audit Lighthouse vero costa ~10-30s (una seconda navigazione browser
+   headless), un ordine di grandezza più di un fetch HTTP — farlo scattare
+   su ogni chiamata `WEBSITE_DATA` della pipeline sarebbe lo stesso errore
+   che il fallback JS del provider già evita.
+
+3. `evaluate_website_opportunity` (`app/services/opportunity_engine.py`):
+   terza regola implementata (delle sei `OpportunityType`), stesso stile
+   delle due esistenti — soglie configurabili
+   (`config/default.yaml: opportunity_rules.website_opportunity`), `None`
+   solo quando non esiste alcun `WebsiteProfile` per il brand, `NONE`/
+   "insufficient_website_data" quando il profilo esiste ma nessun segnale
+   è mai stato misurato.
+
+**Gap noto, non chiuso qui — identico nella forma a quello di Fase 2**:
+niente in questa pipeline scrive mai un `Brand.website` o una riga
+`WebsiteProfile` — `evaluate_website_opportunity` è vera e testata ma
+oggi non riceve mai input reali, perché la discovery non impara mai
+l'URL del sito di un brand. Segnalato esplicitamente nel docstring del
+modulo, non nascosto: **due gap di ingestion gemelli (scraping Amazon →
+DB, website discovery → `WebsiteProfile`) restano da chiudere prima che
+questa fase produca risultati end-to-end**, non solo componenti isolati
+testati.
+
+**Verifica eseguita**: suite completa **309 passati, 2 saltati, 0
+falliti** (baseline 296 + 13 nuovi test — 6 su `AmzPyAdapter`/parser vero
+già contati nella baseline di Fase 2, i 13 di questa pass sono tutti
+Fase 3/4: mobile_friendly ×2, performance-audit opt-in/fallimento/reale
+×3+1, `evaluate_website_opportunity` ×6, wiring DB ×1). `ruff check`
+pulito, `mypy` pulito su tutti i file toccati (un solo errore corretto
+durante questa pass: `AttributeValueList` di bs4 su `viewport_tag.get(...)`,
+non un errore preesistente).

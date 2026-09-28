@@ -16,6 +16,18 @@ cheap tier's own output signals it wasn't enough.
 Everything else in app/tools/{amazon,keepa}/ is mock-only today because no
 real credentials have been confirmed (see docs/architecture.md addendum,
 2026-09-21).
+
+Fase 3/4 (28/09) added two more WEBSITE_DATA signals:
+- `mobile_friendly` — free, always computed from the same HTML this
+  provider already fetched (see html_parser.parse_website_html), no
+  extra cost, so it's always included like the other three.
+- `page_speed_score`/`seo_score` — from a real Lighthouse CLI run
+  (performance_auditor.py), meaningfully more expensive (a second
+  headless-browser navigation, ~10-30s). Opt-in only, via
+  `fetch(..., include_performance_audit=True)` — never on by default,
+  same "browser tier is never the default path" discipline this module
+  already applies to the JS-rendering fallback below, just one step
+  further out.
 """
 from __future__ import annotations
 
@@ -30,6 +42,7 @@ from app.tools.core.capability import Capability
 from app.tools.core.provider import IntelligenceProvider, ProviderResult, ProviderUnavailableError
 from app.tools.website.html_parser import looks_js_rendered, parse_website_html
 from app.tools.website.http_client import WebsiteFetchError, fetch_page
+from app.tools.website.performance_auditor import LighthousePerformanceAuditor, PerformanceAuditor
 
 # Signals that come straight from a documented HTML element (a <title> tag,
 # a meta description that is either present or not) are close to FACT-grade;
@@ -50,11 +63,16 @@ class WebsiteIntelligenceProvider(IntelligenceProvider):
     name = "website_intelligence"
     supported_capabilities = frozenset({Capability.WEBSITE_DATA})
 
-    def __init__(self, browser_engine: BrowserAutomationEngine | None = None) -> None:
+    def __init__(
+        self,
+        browser_engine: BrowserAutomationEngine | None = None,
+        performance_auditor: PerformanceAuditor | None = None,
+    ) -> None:
         # Lazily resolved on first use if not injected, so constructing a
         # provider never forces a MOCK_MODE/settings decision or a
         # Chromium-availability check before it's actually needed.
         self._browser_engine = browser_engine
+        self._performance_auditor = performance_auditor
 
     async def health(self) -> ToolHealthStatus:
         # No credentials, no rate limit tracked yet — this provider is
@@ -67,6 +85,11 @@ class WebsiteIntelligenceProvider(IntelligenceProvider):
         if self._browser_engine is None:
             self._browser_engine = build_browser_engine()
         return self._browser_engine
+
+    def _auditor(self) -> PerformanceAuditor:
+        if self._performance_auditor is None:
+            self._performance_auditor = LighthousePerformanceAuditor()
+        return self._performance_auditor
 
     async def fetch(self, capability: Capability, **params: Any) -> list[ProviderResult]:
         if capability != Capability.WEBSITE_DATA:
@@ -129,7 +152,42 @@ class WebsiteIntelligenceProvider(IntelligenceProvider):
                 observed_at=observed_at,
                 source_url=source_url,
             ),
+            ProviderResult(
+                capability=Capability.WEBSITE_DATA,
+                data={"mobile_friendly": signals["mobile_friendly"]},
+                # Stesso trattamento di technology/has_chatbot: e' un pattern-match
+                # (presenza del viewport meta tag), non un rendering reale su un
+                # dispositivo mobile -- INFERENCE, mai FACT. Fase 3/4, 28/09.
+                data_type=DataType.INFERENCE,
+                confidence=_INFERRED_SIGNAL_CONFIDENCE - confidence_penalty,
+                acquisition_method=acquisition_method,
+                observed_at=observed_at,
+                source_url=source_url,
+            ),
         ]
+
+        if params.get("include_performance_audit"):
+            perf = await self._auditor().audit(source_url)
+            if perf is not None:
+                results.append(
+                    ProviderResult(
+                        capability=Capability.WEBSITE_DATA,
+                        data={"page_speed_score": perf.page_speed_score, "seo_score": perf.seo_score},
+                        # Una misura reale di uno strumento automatico (Lighthouse), non
+                        # un pattern-match (INFERENCE) ne' un valore letto direttamente
+                        # dal markup (FACT) -- varia da run a run per condizioni di rete
+                        # e carico macchina, motivo per cui e' ESTIMATE, non FACT.
+                        data_type=DataType.ESTIMATE,
+                        confidence=80.0,
+                        acquisition_method=AcquisitionMethod.BROWSER,
+                        observed_at=datetime.now(UTC),
+                        source_url=source_url,
+                    )
+                )
+            # perf is None (binario assente, timeout, pagina irraggiungibile): nessun
+            # ProviderResult aggiunto -- stesso principio del fallback browser sopra,
+            # un audit fallito non e' un errore del provider, e' un'assenza di dato.
+
         return results
 
     async def _try_browser_fallback(self, url: str) -> str | None:
