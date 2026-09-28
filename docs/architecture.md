@@ -1608,3 +1608,62 @@ Fase 3/4: mobile_friendly ×2, performance-audit opt-in/fallimento/reale
 pulito, `mypy` pulito su tutti i file toccati (un solo errore corretto
 durante questa pass: `AttributeValueList` di bs4 su `viewport_tag.get(...)`,
 non un errore preesistente).
+
+## Addendum (25) — 28/09: Fase 5 — AIAdvisor + AIRecommendation ("cosa fare e come")
+
+**La tensione da risolvere, non aggirare**: `app/ai/analyst.py` vieta
+esplicitamente ad AIAnalyst di produrre raccomandazioni — regola 6 del
+suo system prompt, "a human advisor does that". Fil ha chiesto fin
+dall'inizio di questa fase "mi suggerisce cosa e come cambiarlo": un
+requisito reale, non compatibile con lasciare quel divieto com'è senza
+aggiungere nulla. Risolto costruendo un SECONDO ruolo AI, non indebolendo
+il primo: `AIAdvisor` (`app/ai/advisor.py`) ha le sue proprie regole, con
+un confine diverso — non diagnostica mai un problema da solo (riceve
+un'`Opportunity` già decisa deterministicamente come fatto dato, non la
+mette in discussione), non scrive mai un messaggio di contatto (Fase 6),
+non dà mai un giudizio commerciale finale (contattare o no). Il "final
+say" resta umano in entrambi i ruoli — solo spostato di un passo, da
+"cosa è vero" a "come risolverlo tecnicamente", mai fino a "contattalo e
+digli X".
+
+**Componenti**: `AIRecommendationDraft`/`AIRecommendation`
+(`app/ai/contracts.py`, stesso pattern draft-vs-stampato di
+`AIClaimDraft`/`AIClaim`) — `priority`/`opportunity_id`/`opportunity_type`
+vengono SEMPRE dalla riga `Opportunity` reale, mai dal modello. Tabella
+`ai_recommendations` (`app/models/ai_recommendation.py`, migrazione
+`ca4b32ec054d`) con FK reale verso `opportunities`. Motore batch
+`app/services/ai_recommendation_engine.py`, stesso shape
+`AgentRun`/`max_brands`/`truncated`/`ai_disabled` degli altri motori.
+
+**Scelte di scoping, non ovvie**:
+- Solo `AMAZON_OPPORTUNITY`/`WEBSITE_OPPORTUNITY` sono ammesse:
+  `BUSINESS_VALUE` è un segnale di targeting ("quanto vale questo
+  brand"), non un difetto — chiedere un consiglio su un `BUSINESS_VALUE`
+  HIGH non avrebbe senso, sarebbe la stessa regola-senza-fondamento che
+  `opportunity_engine.py` già rifiuta per `SELLER_FAST_FIT`.
+- Solo la riga `Opportunity` più recente per (brand, tipo): essendo
+  `Opportunity` append-only, una query su "tutte le righe HIGH/MEDIUM"
+  avrebbe rigenerato consigli su valutazioni storiche già superate.
+- Deduplica per `opportunity_id` (non per brand): la stessa riga
+  Opportunity non viene mai consigliata due volte; una NUOVA valutazione
+  (nuova riga, anche con lo stesso `rule_triggered`) riceve invece un
+  nuovo tentativo — comportamento corretto, non un bug.
+- `AIAdvisor.recommend()` accetta esplicitamente evidence vuota (a
+  differenza di `AIAnalyst.analyze([])`, che ritorna subito
+  `INSUFFICIENT_EVIDENCE`): caso reale oggi, perché le Opportunity
+  `WEBSITE` non hanno ancora evidence propria (stesso gap di ingestion
+  descritto nell'Addendum 24) — il `rule_triggered`/`reasons` da soli
+  sono già un input sufficiente per un consiglio onesto.
+
+**Verifica eseguita**: suite completa **329 passati, 2 saltati, 0
+falliti** (baseline 309 + 20 nuovi test — 8 su `AIAdvisor` con
+`MockAIProvider`, 12 su `ai_recommendation_engine` reale-Postgres:
+wiring base, brand senza opportunity, livello NONE, esclusione
+BUSINESS_VALUE, solo-la-più-recente-per-tipo, deduplica per
+opportunity_id, nuova riga = nuovo tentativo, isolamento fallimenti AI,
+AI disabilitata, bookkeeping AgentRun/AgentEvent, cap max_brands, brand
+MERGED escluso). `ruff check .` pulito. `mypy app tests`: stessi 3 errori
+preesistenti non toccati da questa pass (2 in `test_ai_provider.py`,
+1 stub mancante di `amzpy.parser` in `test_amazon_scraping_provider.py`
+— nessuno introdotto qui). Migrazione Alembic applicata
+(`99ceb1d2af8f` → `ca4b32ec054d`), verificata con `alembic current`.

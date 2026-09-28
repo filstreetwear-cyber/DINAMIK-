@@ -7,6 +7,7 @@ prevent that.
 """
 from app.models.agent_run import AgentEvent, AgentRun, ErrorLog, ToolCall
 from app.models.ai_claim import AIClaim
+from app.models.ai_recommendation import AIRecommendation
 from app.models.amazon import AmazonListing, AmazonProduct, AmazonSeller
 from app.models.auditor_package import AuditorPackage
 from app.models.base import Base
@@ -23,6 +24,7 @@ from app.models.weekly_scan import EntitySnapshot, WeeklyScan
 
 __all__ = [
     "AIClaim",
+    "AIRecommendation",
     "AgentEvent",
     "AgentRun",
     "AmazonListing",
