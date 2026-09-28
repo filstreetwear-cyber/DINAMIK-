@@ -177,3 +177,18 @@ class AIRecommendation(BaseModel):
             model=model,
             provider=provider,
         )
+
+
+class ContactDraftBody(BaseModel):
+    """Fase 6 (28/09) — shape di structured-output per AIOutreachWriter
+    (`app/ai/outreach_writer.py`), un TERZO ruolo AI, distinto sia da
+    AIAnalyst che da AIAdvisor. Solo ciò che il modello scrive davvero:
+    oggetto e corpo di una bozza email. Nessun campo di stato/invio qui —
+    questo contratto non decide se/quando la bozza viene mandata, quello
+    resta sempre una decisione umana (vedi outreach_writer.py e
+    app/models/contact_draft.py)."""
+
+    model_config = ConfigDict(frozen=True)
+
+    subject: str = Field(min_length=1, max_length=255)
+    body: str = Field(min_length=1, max_length=4000)

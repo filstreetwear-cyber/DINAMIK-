@@ -14,6 +14,7 @@ from app.models.base import Base
 from app.models.browser import BrowserSession, BrowserTask
 from app.models.company import Brand, Company
 from app.models.contact import Contact, ProspectStatus
+from app.models.contact_draft import ContactDraft
 from app.models.evidence import Evidence
 from app.models.market import Competitor, Keyword
 from app.models.marketplace import Category, Marketplace
@@ -39,6 +40,7 @@ __all__ = [
     "Company",
     "Competitor",
     "Contact",
+    "ContactDraft",
     "EntitySnapshot",
     "ErrorLog",
     "Evidence",

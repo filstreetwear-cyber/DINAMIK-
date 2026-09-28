@@ -1667,3 +1667,53 @@ preesistenti non toccati da questa pass (2 in `test_ai_provider.py`,
 1 stub mancante di `amzpy.parser` in `test_amazon_scraping_provider.py`
 — nessuno introdotto qui). Migrazione Alembic applicata
 (`99ceb1d2af8f` → `ca4b32ec054d`), verificata con `alembic current`.
+
+## Addendum (26) — 28/09: Fase 6 — AIOutreachWriter + ContactDraft ("bozza di contatto")
+
+**Terzo (e ultimo, per come questo progetto è specificato oggi) ruolo
+AI**, distinto sia da AIAnalyst ("cosa è vero") che da AIAdvisor ("cosa
+fare e come", Fase 5) — quest'ultimo vieta esplicitamente di scrivere un
+messaggio di contatto (regola 5 del suo system prompt), quindi
+`AIOutreachWriter` (`app/ai/outreach_writer.py`) è un modulo apposta, con
+le proprie regole più strette (il testo qui uscirà, dopo revisione
+umana, davanti a un vero venditore): mai un prezzo/sconto/scadenza
+promessi, mai la finzione di aver già lavorato per il venditore, sempre
+dichiaratamente una bozza per un umano — nessuna integrazione di invio
+email reale esiste in questo progetto, per scelta.
+
+**Chiude un gap documentato invece di aprirne uno nuovo**: `ProspectStatus`
+(`app/models/contact.py`) esiste da Milestone 6 come "the human-in-the-loop
+gate", ma `app/main.py`'s own scope note dichiarava esplicitamente che
+nessun servizio lo ha mai popolato. `contact_draft_engine.py` è il primo
+writer reale: quando una bozza viene generata, scrive
+`ProspectStatus(status=NEEDS_REVIEW, changed_by="system")` — non un
+nuovo concetto di stato parallelo a `Opportunity`/`AIRecommendation`.
+
+**Componenti**: `ContactDraftBody` (`app/ai/contracts.py`, solo
+subject/body — niente id/provenienza, quelli stampati dal chiamante).
+Tabella `contact_drafts` (`app/models/contact_draft.py`, migrazione
+`804dc045d4fc`). Motore `app/services/contact_draft_engine.py`: un brand
+con ≥1 `AIRecommendation` e ancora nessuna `ContactDraft` riceve UNA
+bozza che sintetizza tutte le sue raccomandazioni correnti; una volta
+generata, non viene rigenerata automaticamente (deduplica per brand, non
+per singola raccomandazione — scelta deliberata contro lo spam di bozze,
+documentata nel modulo, non una svista).
+
+**Verifica eseguita**: suite completa **345 passati, 2 saltati, 0
+falliti** (baseline 329 + 16 nuovi test — 8 su `AIOutreachWriter` con
+`MockAIProvider`, 8 su `contact_draft_engine` reale-Postgres: bozza +
+ProspectStatus persistiti, brand senza raccomandazioni saltato senza
+chiamata AI, niente doppia bozza su una seconda esecuzione, isolamento
+fallimenti AI, AI disabilitata, bookkeeping AgentRun/AgentEvent, cap
+max_brands, brand MERGED escluso). `ruff check .` pulito. `mypy app
+tests`: stessi 3 errori preesistenti, nessuno nuovo. Migrazione Alembic
+applicata (`ca4b32ec054d` → `804dc045d4fc`).
+
+**Catena end-to-end ora reale, dato l'input giusto**: Opportunity (Fase
+3/4, deterministica) → AIRecommendation (Fase 5, "cosa fare") →
+ContactDraft (Fase 6, "bozza di contatto") + ProspectStatus=NEEDS_REVIEW
+— i tre pezzi del ciclo che Fil ha descritto fin dall'inizio di questa
+fase sono tutti costruiti e testati. Quello che manca perché produca
+risultati su brand reali resta l'ingestion (Addendum 24/25: scraping
+Amazon → DB, website discovery → WebsiteProfile) — non un gap di questa
+fase, lo stesso gap gemello già segnalato due volte.
