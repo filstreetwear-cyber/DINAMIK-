@@ -15,18 +15,29 @@ future" mistake `AgentRegistry`'s own docstring already warns against for
 a base `Agent` class. That decision stays deferred, unchanged, until
 Agent 02 exists — this module does not revisit it.
 
-**What "orchestration" concretely, honestly means today**: five real,
+**What "orchestration" concretely, honestly means today**: eight real,
 already-working stages exist — `run_amazon_scout_discovery` (Milestone 5),
 `resolve_research_job` (6), `run_brand_deduplication` (7),
 `run_opportunity_engine` (8), `run_scoring_engine` (9), `run_ai_analysis_
-engine` (10) — and nothing in this codebase runs them together as one
-job. Every test that exercises more than one stage (e.g.
-`test_scoring_engine.py` calling `run_opportunity_engine` then
-`run_scoring_engine`) does so by hand, one call at a time, inside the
-test itself. This module is that missing wiring: a single callable that
-runs the full chain in the right order, reusable by a future CLI/API
+engine` (10), `run_ai_recommendation_engine` (Fase 5, 28/09),
+`run_contact_draft_engine` (Fase 6, 28/09) — and nothing in this codebase
+runs them together as one job. Every test that exercises more than one
+stage (e.g. `test_scoring_engine.py` calling `run_opportunity_engine`
+then `run_scoring_engine`) does so by hand, one call at a time, inside
+the test itself. This module is that missing wiring: a single callable
+that runs the full chain in the right order, reusable by a future CLI/API
 (Milestone 12/13) or scheduler (Milestone 14) instead of each of those
-reimplementing the same six-call sequence.
+reimplementing the same eight-call sequence.
+
+**Fase 7 addendum (28/09)**: `run_ai_recommendation_engine`/
+`run_contact_draft_engine` were built in Fase 5/6 but never wired in
+here — found during a Fase 7 monitoring pass ("is the pipeline actually
+end-to-end") specifically because `PipelineSummary` only went as far as
+`ai_analysis_engine`, so nothing calling this orchestrator (the CLI's
+`pipeline run`, a future scheduler) would ever have triggered them. Fixed
+here rather than left as a third documented gap alongside the two
+ingestion gaps (Addendum 24/25) — those need new data sources; this only
+needed two more calls in the existing chain.
 
 **Why a straight sequential chain is safe, not naive**: every stage
 already fails safe internally — each wraps its own body in a try/except
@@ -71,8 +82,13 @@ from app.ai.gateway import AIGateway
 from app.core.config import Settings, get_settings
 from app.models import AgentEvent, AgentRun, ResearchJob
 from app.services.ai_analysis_engine import AIAnalysisEngineSummary, run_ai_analysis_engine
+from app.services.ai_recommendation_engine import (
+    AIRecommendationEngineSummary,
+    run_ai_recommendation_engine,
+)
 from app.services.brand_deduplication import DeduplicationSummary, run_brand_deduplication
 from app.services.brand_resolution import BrandResolutionJobSummary, resolve_research_job
+from app.services.contact_draft_engine import ContactDraftEngineSummary, run_contact_draft_engine
 from app.services.opportunity_engine import OpportunityEngineSummary, run_opportunity_engine
 from app.services.scoring_engine import ScoringEngineSummary, run_scoring_engine
 from app.tools.core.bootstrap import build_default_registry
@@ -85,6 +101,8 @@ _STAGE_NAMES = (
     "opportunity_engine",
     "scoring_engine",
     "ai_analysis_engine",
+    "ai_recommendation_engine",  # Fase 5, 28/09 -- vedi docstring modulo
+    "contact_draft_engine",  # Fase 6, 28/09 -- vedi docstring modulo
 )
 
 
@@ -97,6 +115,8 @@ class PipelineSummary:
     opportunity_engine: OpportunityEngineSummary
     scoring_engine: ScoringEngineSummary
     ai_analysis_engine: AIAnalysisEngineSummary
+    ai_recommendation_engine: AIRecommendationEngineSummary
+    contact_draft_engine: ContactDraftEngineSummary
 
 
 async def _stage_status(session: AsyncSession, agent_run_id: uuid.UUID) -> str:
@@ -115,7 +135,8 @@ async def run_research_pipeline(
     max_batch: int = 200,
 ) -> PipelineSummary:
     """Runs the full discovery -> resolution -> dedup -> opportunity ->
-    scoring -> AI analysis chain for one call, in that order. `job` is a
+    scoring -> AI analysis -> AI recommendation -> contact draft chain for
+    one call, in that order. `job` is a
     not-yet-run `ResearchJob` the caller has already added to `session`
     (mirrors `run_amazon_scout_discovery`'s own contract -- this function
     does not create the job). `provider_orchestrator`/`ai_gateway` are
@@ -148,6 +169,12 @@ async def run_research_pipeline(
     ai_analysis = await run_ai_analysis_engine(
         session, max_brands=max_batch, settings=settings, gateway=resolved_ai_gateway
     )
+    ai_recommendation = await run_ai_recommendation_engine(
+        session, max_brands=max_batch, settings=settings, gateway=resolved_ai_gateway
+    )
+    contact_draft = await run_contact_draft_engine(
+        session, max_brands=max_batch, settings=settings, gateway=resolved_ai_gateway
+    )
 
     stage_run_ids = (
         discovery.agent_run_id,
@@ -156,6 +183,8 @@ async def run_research_pipeline(
         opportunity.agent_run_id,
         scoring.agent_run_id,
         ai_analysis.agent_run_id,
+        ai_recommendation.agent_run_id,
+        contact_draft.agent_run_id,
     )
     for stage_name, stage_run_id in zip(_STAGE_NAMES, stage_run_ids, strict=True):
         session.add(
@@ -183,4 +212,6 @@ async def run_research_pipeline(
         opportunity_engine=opportunity,
         scoring_engine=scoring,
         ai_analysis_engine=ai_analysis,
+        ai_recommendation_engine=ai_recommendation,
+        contact_draft_engine=contact_draft,
     )

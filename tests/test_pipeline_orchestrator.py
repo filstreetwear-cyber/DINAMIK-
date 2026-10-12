@@ -1,12 +1,24 @@
 """
-Milestone 11: Pipeline Orchestrator — the first real, single call that
-chains discovery -> brand resolution -> dedup -> opportunity -> scoring ->
-AI analysis. Not a multi-agent orchestrator (see the module's own
-docstring for why that stays deferred to when Agent 02 exists) -- this
-proves the WIRING between six already-tested stages is real: the right
-call order, real AgentEvent bookkeeping per stage, and that the whole
-chain runs against real (mock-mode) providers end to end without manual
+Milestone 11 + Fase 7 (28/09): Pipeline Orchestrator — the first real,
+single call that chains discovery -> brand resolution -> dedup ->
+opportunity -> scoring -> AI analysis -> AI recommendation -> contact
+draft. Not a multi-agent orchestrator (see the module's own docstring for
+why that stays deferred to when Agent 02 exists) -- this proves the
+WIRING between eight already-tested stages is real: the right call
+order, real AgentEvent bookkeeping per stage, and that the whole chain
+runs against real (mock-mode) providers end to end without manual
 per-stage calls, same discipline as every other engine's own test file.
+
+The last two stages (Fase 5/6) create zero rows against this file's mock
+fixture -- the Casa e cucina fixture's one resolved brand has healthy
+AMAZON_OPPORTUNITY (NONE, confirmed in test_opportunity_engine.py's own
+end-to-end test) and no WebsiteProfile at all, so nothing is actionable
+for AIRecommendation/ContactDraft. That's fine and expected here: this
+file proves the two stages RUN as part of the chain (their own AgentRun
+exists, SUCCESS), not that this specific fixture gives them something to
+act on -- that's what test_ai_recommendation_engine.py/
+test_contact_draft_engine.py already prove with purpose-built Opportunity
+rows.
 
 Same real-Postgres-or-skip pattern, and the same MockAIProvider injection
 discipline as test_ai_analysis_engine.py -- no real Ollama required here
@@ -136,6 +148,16 @@ async def test_full_pipeline_runs_all_six_stages_in_order(
     assert ai_run is not None
     assert ai_run.status == "SUCCESS"
 
+    # Fase 7: the two new stages actually ran as part of the chain (their
+    # own AgentRun exists and succeeded), even though this fixture gives
+    # them nothing actionable to produce -- see module docstring.
+    ai_recommendation_run = await session.get(AgentRun, summary.ai_recommendation_engine.agent_run_id)
+    assert ai_recommendation_run is not None
+    assert ai_recommendation_run.status == "SUCCESS"
+    contact_draft_run = await session.get(AgentRun, summary.contact_draft_engine.agent_run_id)
+    assert contact_draft_run is not None
+    assert contact_draft_run.status == "SUCCESS"
+
 
 @pytest.mark.asyncio
 async def test_pipeline_agent_run_records_one_event_per_stage(
@@ -161,7 +183,7 @@ async def test_pipeline_agent_run_records_one_event_per_stage(
         .scalars()
         .all()
     )
-    assert len(events) == 6
+    assert len(events) == 8
     payloads = [e.payload for e in events]
     assert all(p is not None for p in payloads)
     stages = {p["stage"] for p in payloads if p is not None}
@@ -172,6 +194,8 @@ async def test_pipeline_agent_run_records_one_event_per_stage(
         "opportunity_engine",
         "scoring_engine",
         "ai_analysis_engine",
+        "ai_recommendation_engine",
+        "contact_draft_engine",
     }
     assert all(p["stage_status"] == "SUCCESS" for p in payloads if p is not None)
 

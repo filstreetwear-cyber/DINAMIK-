@@ -123,7 +123,8 @@ def pipeline_run(
 ) -> None:
     """Creates a new ResearchJob and runs the full Milestone 11 pipeline
     (discovery -> resolution -> dedup -> opportunity -> scoring -> AI
-    analysis) against it, then commits. This is the first command in this
+    analysis -> AI recommendation -> contact draft, Fase 7 addendum 28/09)
+    against it, then commits. This is the first command in this
     codebase that actually commits real data — every stage underneath
     explicitly leaves that to the caller (see pipeline_orchestrator.py's
     own docstring), and this command is that caller."""

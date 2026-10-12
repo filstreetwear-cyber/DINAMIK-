@@ -1717,3 +1717,69 @@ fase sono tutti costruiti e testati. Quello che manca perché produca
 risultati su brand reali resta l'ingestion (Addendum 24/25: scraping
 Amazon → DB, website discovery → WebsiteProfile) — non un gap di questa
 fase, lo stesso gap gemello già segnalato due volte.
+
+## Addendum (27) — scritto 28/09, verificato e committato 12/10: Fase 7 — wiring pipeline_orchestrator, non ancora il health-check
+
+**Cosa è successo tra le due date**: il codice di questa modifica è
+stato scritto il 28/09 durante un audit ("la pipeline è davvero
+end-to-end?"), ma la verifica (pytest/ruff/mypy) non è mai arrivata a
+termine quella sessione per un'indisponibilità infrastrutturale dello
+shell, non del codice. Il container è poi rimasto inattivo per circa
+due settimane; a questa ripresa (12/10) anche Postgres era fermo
+(container riavviato a freddo) — ripartito con `pg_ctlcluster 16 main
+start`, non un bug applicativo. Lo scheduled retry impostato il 28/09
+è effettivamente scattato (confermato dalla notifica ricevuta), ma
+senza una sessione attiva a seguirlo il lavoro di verifica/commit non è
+stato completato: le tre modifiche sono rimaste working-tree, non
+perse — nessun codice è andato perso, solo il commit era in ritardo.
+
+**Trovato durante l'audit (gap reale, non ipotetico)**: `run_ai_
+recommendation_engine`/`run_contact_draft_engine` (Fase 5/6) erano
+costruiti e testati ma MAI chiamati da `run_research_pipeline` —
+l'unico punto che un futuro CLI/scheduler invocherebbe per eseguire la
+catena completa. `PipelineSummary` si fermava a `ai_analysis_engine`.
+Risultato pratico: chiunque avesse lanciato `dinamik pipeline run`
+avrebbe ottenuto Opportunity/Score/AIClaim ma MAI una AIRecommendation
+o una ContactDraft, anche con dati reali e AI funzionante. Non è un
+problema dei moduli di Fase 5/6 (già verificati singolarmente nei
+loro service engine) — è un problema di composizione, l'esatto tipo di
+bug che una pass di "monitoraggio/health-check pipeline" deve
+scovare.
+
+**Fix**: due chiamate sequenziali in più nella stessa catena già
+esistente (`app/services/pipeline_orchestrator.py`), `_STAGE_NAMES` e
+`PipelineSummary` estesi da 6 a 8 stage, `stage_run_ids` e gli
+`AgentEvent` per-stage estesi di conseguenza. `app/cli.py`'s docstring
+di `pipeline run` aggiornato per riflettere la catena a 8 stage.
+`tests/test_pipeline_orchestrator.py` esteso con asserzioni esplicite
+che i due nuovi `AgentRun` esistano e siano `SUCCESS`, e che gli eventi
+per-pipeline-run siano 8 non 6 (il fixture di questo file non dà nulla
+di azionabile a Fase 5/6 — nessuna WebsiteProfile, AMAZON_OPPORTUNITY
+sano — quindi queste asserzioni provano che gli stage GIRANO, non che
+producono righe; quello lo provano già test_ai_recommendation_engine.py
+e test_contact_draft_engine.py con fixture costruiti apposta).
+
+**Verifica eseguita oggi (12/10), con Postgres reale**: suite completa
+**345 passati, 2 saltati, 0 falliti** — stesso numero già raggiunto a
+fine Fase 6 (nessun test nuovo aggiunto in questa fase, solo asserzioni
+estese su test esistenti). `ruff check .` ha segnalato 1 problema reale
+introdotto da questa modifica (ordine import in `pipeline_orchestrator.
+py` dopo l'aggiunta dell'import di `ai_recommendation_engine`) —
+corretto con `ruff check . --fix`, ora pulito. `mypy app tests`: stessi
+3 errori pre-esistenti e già documentati (2 in `test_ai_provider.py` su
+`AIProvider._base_url`, 1 stub mancante di `amzpy.parser` in
+`test_amazon_scraping_provider.py`), nessuno nuovo.
+
+**Cosa NON è ancora fatto, e non va confuso con "Fase 7 completata"**:
+questo addendum chiude solo il bug di wiring trovato durante l'audit.
+Il nome della fase ("Monitoraggio/health-check pipeline") promette
+qualcosa che non esiste ancora: `app/cli.py`'s comando `health`
+(Milestone 12) controlla oggi solo config + connettività DB reale +
+stato del gateway AI — non lo stato per-stage dell'ultima
+`run_research_pipeline` (quale stage ha fallito, quando, con quale
+errore), né la presenza dei binari esterni che due provider reali
+richiedono (`amzpy` per lo scraping Amazon, il CLI `lighthouse` per
+l'audit di performance del sito). Estendere `health` con questi due
+controlli è il lavoro vero e proprio di Fase 7 rimasto da fare — questo
+addendum documenta solo la premessa (la pipeline ora è davvero
+end-to-end) su cui quel lavoro si appoggia, non lo sostituisce.
