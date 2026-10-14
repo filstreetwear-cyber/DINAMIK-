@@ -143,6 +143,21 @@ solo le due funzioni che servono allo Scout, con dati propri.
 - **Stima vendite da BSR**: curva per categoria, usata solo per fasce
   (piccolo / medio / grande venditore), mai come numero preciso nei report.
 
+### Componenti esterni da valutare (14/10) — non riscrivere ciò che esiste
+
+- **VIES** (Commissione UE, `ec.europa.eu/taxation_customs/vies/rest-api`):
+  validare la P.IVA trovata sulla pagina seller e recuperare ragione sociale
+  e indirizzo ufficiali. Verificare prima gratuità, limiti e copertura dei
+  dati per l'Italia. Serve anche come chiave di deduplica forte (stessa
+  P.IVA = stessa azienda).
+- **rapidfuzz**: somiglianza tra nomi brand/seller per i casi senza P.IVA,
+  dentro `brand_deduplication`, senza cambiare le regole di merge esistenti.
+- **Crawlee for Python** (Apify, open source): coda, retry e limite di
+  ritmo per lo scraper. Valutare solo se il codice di coda scritto a mano
+  diventa più complesso di questo; non è un obbligo.
+- Nessun repo open source trovato che estragga venditore da Amazon.it:
+  il parser seller/listing va scritto da noi.
+
 ### Regole di lavoro
 
 - Test e `ruff check .` verdi prima di ogni commit; `mypy app tests` non
