@@ -174,3 +174,16 @@ Questo è il prossimo lavoro concreto di Fase 7, non ancora iniziato.
   `test_ai_provider.py`, 1 stub mancante `amzpy.parser` in
   `test_amazon_scraping_provider.py`) — qualsiasi numero diverso da questo
   dopo una modifica è un segnale reale, non rumore.
+
+## Aggiornamento 2026-10-14
+
+- Progetto importato nel repo GitHub `filstreetwear-cyber/DINAMIK-` (branch
+  `claude/dinamik-advisor-scout-mvp-7no1zb`) con tutta la storia git; prima
+  il repo conteneva solo un README vuoto, quindi niente è stato sovrascritto.
+- Fix `migrations/env.py`: con SQLAlchemy 2.1 (non pinnato in
+  `pyproject.toml`) un URL `postgresql://` senza driver usa `psycopg` (v3),
+  non installato → `alembic upgrade head` falliva su installazione fresca.
+  Ora l'URL sincrono forza `+psycopg2` (già tra le dipendenze).
+- Baseline riverificata in sandbox pulito: 344 passed, 3 skipped (il terzo
+  skip è il test Lighthouse reale, CLI non installato qui).
+- Prossima milestone: `docs/architecture/milestone-anello-1-prompt.md`.
