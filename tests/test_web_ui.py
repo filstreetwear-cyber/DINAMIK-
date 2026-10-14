@@ -87,8 +87,16 @@ def client(tmp_path_factory) -> Iterator[TestClient]:
     # dell'app è legato all'event loop del primo TestClient.
     if not asyncio.run(_db_reachable()):
         pytest.skip("PostgreSQL not reachable")
+    # Fixture di modulo: gira prima dell'isolamento per-test di conftest,
+    # quindi isola qui le cartelle generate (report, evidenze).
+    mp = pytest.MonkeyPatch()
+    mp.setenv("SCOUT_REPORTS_DIR", str(tmp_path_factory.mktemp("reports")))
+    mp.setenv("SCOUT_EVIDENCE_DIR", str(tmp_path_factory.mktemp("evidence")))
+    get_settings.cache_clear()
     asyncio.run(_cleanup())
     asyncio.run(_seed(tmp_path_factory.mktemp("ev")))
+    mp.undo()
+    get_settings.cache_clear()
     # Un altro modulo (tests/test_main.py) può aver lasciato il pool dell'app
     # legato al suo event loop: lo si abbandona senza chiudere (close=False).
     asyncio.run(app_engine.dispose(close=False))

@@ -39,7 +39,7 @@ def product_html(
     else:
         seller_block = ""
     thumbs = "".join(
-        f'<li class="a-spacing-small item imageThumbnail"><img src="https://m.media-amazon.com/images/I/img{i}.jpg"></li>'
+        f'<li class="a-spacing-small item imageThumbnail"><img src="/images/I/img{i}.jpg"></li>'
         for i in range(images)
     )
     video_li = '<li class="videoThumbnail"><img src="v.jpg"></li>' if video else ""
