@@ -46,6 +46,32 @@ opportunity_rules:
   website_opportunity:
     min_page_speed_score_threshold: 50
     min_seo_score_threshold: 50
+  # Anello 1 (2026-10-14): qualità della scheda prodotto. Un prodotto è
+  # "debole" se viola almeno min_issues_per_product regole; il livello del
+  # brand dipende dalla quota di prodotti deboli.
+  listing_opportunity:
+    min_image_count: 6
+    min_bullet_count: 5
+    min_title_length: 60
+    max_title_length: 200
+    require_video: true
+    require_a_plus: true
+    min_issues_per_product: 2
+    high_weak_share: 0.5
+
+# Anello 1 (2026-10-14): scraper Amazon.it + qualificazione venditori.
+# Gira dal PC di casa (IP residenziale), mai dal server OVH.
+scout:
+  base_url: "https://www.amazon.it"
+  min_delay_seconds: 8
+  max_delay_seconds: 15
+  daily_page_limit: 200
+  screenshot_quality: 70
+  # Sede del venditore (paese dell'indirizzo aziendale o prefisso P.IVA).
+  target_countries: ["IT"]
+  # Paesi UE accettati come target di seconda fascia; [] per disattivare.
+  secondary_target_countries: []
+  vies_base_url: "https://ec.europa.eu/taxation_customs/vies/rest-api"
 
 retry:
   network_error:

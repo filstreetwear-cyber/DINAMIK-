@@ -58,8 +58,11 @@ building this module, not left in from a first draft: the original
 suffix list stripped both kinds in the same pass, entirely in the
 auto-merge tier, before this tradeoff was made explicit and fixed.
 
-Both tiers use `difflib.SequenceMatcher` (Python stdlib) for the similarity
-score — not an embedding model, not AI. Rules before AI is a standing
+Both tiers use a deterministic string similarity score — not an embedding
+model, not AI. Originally `difflib.SequenceMatcher`; since Anello 1
+(2026-10-14) `rapidfuzz.fuzz.ratio` (same Indel-based score, identical on
+the calibration examples below, ~100x faster on the O(n^2) pass once real
+scraped volumes arrive). Rules before AI is a standing
 discipline on this project (see `brand_resolution.py`'s own docstring);
 Milestone 7 is explicitly listed as needing no credentials, and a stdlib
 string metric is the deterministic tool actually available today.
@@ -85,12 +88,12 @@ Explicitly out of scope:
 """
 from __future__ import annotations
 
-import difflib
 import re
 import unicodedata
 import uuid
 from dataclasses import dataclass, field
 
+from rapidfuzz import fuzz
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -149,6 +152,11 @@ _ACRONYM_DOT_RE = re.compile(r"(?<=[a-z0-9])\.(?=[a-z0-9])")
 # -> 0.4. 0.88 catches spelling/spacing variants without catching two
 # brands that merely share a word.
 DEFAULT_SIMILARITY_THRESHOLD = 0.88
+
+
+def similarity(a: str, b: str) -> float:
+    """0..1 similarity between two already-normalized names."""
+    return float(fuzz.ratio(a, b)) / 100.0
 
 
 def normalize_brand_name(name: str, *, strip_weak_suffixes: bool = False) -> str:
@@ -360,7 +368,7 @@ async def run_brand_deduplication(session: AsyncSession, max_brands: int = 200) 
             norm_a = normalize_brand_name(brand_a.name, strip_weak_suffixes=True)
             for brand_b in survivors[i + 1 :]:
                 norm_b = normalize_brand_name(brand_b.name, strip_weak_suffixes=True)
-                ratio = difflib.SequenceMatcher(None, norm_a, norm_b).ratio()
+                ratio = similarity(norm_a, norm_b)
                 if ratio >= DEFAULT_SIMILARITY_THRESHOLD:
                     candidates_flagged += 1
                     session.add(

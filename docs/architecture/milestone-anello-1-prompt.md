@@ -143,7 +143,22 @@ solo le due funzioni che servono allo Scout, con dati propri.
 - **Stima vendite da BSR**: curva per categoria, usata solo per fasce
   (piccolo / medio / grande venditore), mai come numero preciso nei report.
 
-### Componenti esterni da valutare (14/10) — non riscrivere ciò che esiste
+### Stato al 14/10 sera: Step 1–4 implementati, da validare su Amazon reale
+
+Codice scritto e testato (HTML sintetico + Chromium reale contro server
+locale; Amazon e VIES non raggiungibili dal sandbox cloud):
+`app/tools/amazon_scraping/page_parser.py`, `fetcher.py`,
+`app/tools/vies/client.py`, `app/services/amazon_ingestion.py`,
+`app/services/scout_runner.py`, regola `LISTING_OPPORTUNITY` in
+`opportunity_engine.py`, comandi `dinamik scout run` / `dinamik scout vies`,
+colonne prospect in `dinamik export brands`. Installazione:
+`docs/anello1-installazione.md`. Lo Step 0 si riduce ai controlli di quella
+guida (`dinamik health`, `pytest -q`).
+
+### Componenti esterni (14/10) — integrati
+
+VIES e rapidfuzz sono **integrati** (decisione di Fil, 14/10). Crawlee no:
+vedi sotto.
 
 - **VIES** (Commissione UE, `ec.europa.eu/taxation_customs/vies/rest-api`):
   validare la P.IVA trovata sulla pagina seller e recuperare ragione sociale
@@ -152,9 +167,12 @@ solo le due funzioni che servono allo Scout, con dati propri.
   P.IVA = stessa azienda).
 - **rapidfuzz**: somiglianza tra nomi brand/seller per i casi senza P.IVA,
   dentro `brand_deduplication`, senza cambiare le regole di merge esistenti.
-- **Crawlee for Python** (Apify, open source): coda, retry e limite di
-  ritmo per lo scraper. Valutare solo se il codice di coda scritto a mano
-  diventa più complesso di questo; non è un obbligo.
+- **Crawlee for Python**: NON integrato. Con 1 richiesta ogni 8–15 s e
+  ~200 pagine/giorno la coda è una lista e il ritmo è uno sleep (già in
+  `fetcher.py`); Crawlee porterebbe un secondo gestore di browser accanto a
+  quello esistente (`app/tools/browser/`) e retry automatici che sono
+  esattamente ciò che non vogliamo davanti a un CAPTCHA. Da rivalutare se
+  lo scout passa a migliaia di pagine al giorno su più macchine.
 - Nessun repo open source trovato che estragga venditore da Amazon.it:
   il parser seller/listing va scritto da noi.
 

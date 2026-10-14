@@ -5,7 +5,7 @@ import uuid
 from datetime import datetime
 from typing import TYPE_CHECKING
 
-from sqlalchemy import DateTime, ForeignKey, String
+from sqlalchemy import Boolean, DateTime, ForeignKey, String, UniqueConstraint
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from app.models.base import Base, TimestampMixin, UUIDPrimaryKeyMixin, utcnow
@@ -17,6 +17,7 @@ if TYPE_CHECKING:
 
 class Company(UUIDPrimaryKeyMixin, TimestampMixin, Base):
     __tablename__ = "companies"
+    __table_args__ = (UniqueConstraint("vat_country", "vat_number", name="uq_company_vat"),)
 
     legal_name: Mapped[str] = mapped_column(String(255))
     brand_name: Mapped[str | None] = mapped_column(String(255), nullable=True)
@@ -28,6 +29,14 @@ class Company(UUIDPrimaryKeyMixin, TimestampMixin, Base):
     linkedin_url: Mapped[str | None] = mapped_column(String(500), nullable=True)
     email: Mapped[str | None] = mapped_column(String(255), nullable=True)
     phone: Mapped[str | None] = mapped_column(String(50), nullable=True)
+    # Anello 1 (2026-10-14): identità legale verificata via VIES. La P.IVA
+    # è la chiave di deduplica forte delle aziende: stessa P.IVA = stessa
+    # azienda, qualunque nome mostri il seller su Amazon.
+    vat_number: Mapped[str | None] = mapped_column(String(20), nullable=True, index=True)
+    vat_country: Mapped[str | None] = mapped_column(String(2), nullable=True)
+    address: Mapped[str | None] = mapped_column(String(1000), nullable=True)
+    vies_valid: Mapped[bool | None] = mapped_column(Boolean, nullable=True)
+    vies_checked_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
 
     brands: Mapped[list[Brand]] = relationship(back_populates="company")
     contacts: Mapped[list[Contact]] = relationship(back_populates="company")

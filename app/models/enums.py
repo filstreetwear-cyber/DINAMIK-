@@ -40,6 +40,7 @@ class EvidenceSourceType(str, enum.Enum):
     PERPETUA = "PERPETUA"
     HELIUM10 = "HELIUM10"
     WEBSITE = "WEBSITE"
+    VIES = "VIES"  # Anello 1: registro IVA UE (Commissione Europea)
     AI_INFERENCE = "AI_INFERENCE"
     USER = "USER"
 

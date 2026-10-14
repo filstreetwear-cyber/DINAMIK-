@@ -30,6 +30,8 @@ def _isolate_generated_dirs(tmp_path, monkeypatch: pytest.MonkeyPatch):
     monkeypatch.setenv("BROWSER_PROFILES_DIR", str(tmp_path / "browser_profiles"))
     monkeypatch.setenv("WEEKLY_REPORTS_DIR", str(tmp_path / "weekly_reports"))
     monkeypatch.setenv("EXPORTS_DIR", str(tmp_path / "exports"))
+    monkeypatch.setenv("SCOUT_EVIDENCE_DIR", str(tmp_path / "evidence"))
+    monkeypatch.setenv("SCOUT_REPORTS_DIR", str(tmp_path / "anello1_reports"))
     get_settings.cache_clear()
     yield
     get_settings.cache_clear()

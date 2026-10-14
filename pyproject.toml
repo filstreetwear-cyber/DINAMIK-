@@ -26,6 +26,7 @@ dependencies = [
     "python-dotenv>=1.0",
     "tenacity>=8.5",
     "openpyxl>=3.1",
+    "rapidfuzz>=3.9",  # Anello 1: similarita' nomi brand (brand_deduplication)
 ]
 
 [project.optional-dependencies]

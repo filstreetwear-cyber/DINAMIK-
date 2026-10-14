@@ -48,6 +48,8 @@ file in this project already uses for the same reason.
 from __future__ import annotations
 
 import asyncio
+from pathlib import Path
+from typing import Annotated
 
 import typer
 from sqlalchemy import select
@@ -70,12 +72,14 @@ brands_app = typer.Typer(help="Inspect resolved brands.")
 pipeline_app = typer.Typer(help="Run the Milestone 11 research pipeline.")
 scan_app = typer.Typer(help="Run and inspect the weekly intelligence scan.")
 export_app = typer.Typer(help="Export data to spreadsheets for the internal team.")
+scout_app = typer.Typer(help="Anello 1: scout live su Amazon.it (da lanciare dal PC di casa).")
 
 app.add_typer(jobs_app, name="jobs")
 app.add_typer(brands_app, name="brands")
 app.add_typer(pipeline_app, name="pipeline")
 app.add_typer(scan_app, name="scan")
 app.add_typer(export_app, name="export")
+app.add_typer(scout_app, name="scout")
 
 
 @app.command()
@@ -421,6 +425,109 @@ async def _export_brands_async(*, status: str, limit: int) -> None:
     typer.echo(f"rows_exported: {summary.rows_exported}")
     typer.echo(f"status_filter: {summary.status_filter}")
     typer.echo(f"path: {summary.path}")
+
+
+def _read_lines(path: Path | None) -> list[str]:
+    if path is None:
+        return []
+    return [ln.strip() for ln in path.read_text(encoding="utf-8").splitlines() if ln.strip() and not ln.startswith("#")]
+
+
+@scout_app.command("run")
+def scout_run(
+    name: str = typer.Option(..., help="Etichetta del run, es. 'casa-cucina-organizzazione'."),
+    asins_file: Annotated[Path | None, typer.Option(help="File con un ASIN (o URL /dp/) per riga.")] = None,
+    urls_file: Annotated[
+        Path | None, typer.Option(help="File con URL di pagine elenco (bestseller, ricerca), uno per riga.")
+    ] = None,
+    asin: Annotated[list[str] | None, typer.Option(help="ASIN singolo, ripetibile: --asin B0... --asin B0...")] = None,
+    url: Annotated[list[str] | None, typer.Option(help="URL pagina elenco singola, ripetibile.")] = None,
+    category: str | None = typer.Option(None, help="Nicchia/categoria, solo come etichetta del job."),
+    max_products: int = typer.Option(30, help="Tetto di schede prodotto per questo run."),
+    evaluate: bool = typer.Option(True, help="Dopo lo scraping: deduplica, opportunità e punteggi."),
+) -> None:
+    """Scarica schede prodotto e profili venditore da Amazon.it, verifica
+    le P.IVA su VIES, salva tutto con le evidenze e scrive il report di
+    validazione in reports/anello1/. Commit dopo ogni prodotto: un CAPTCHA
+    o il tetto giornaliero fermano il run senza perdere quanto raccolto."""
+    asins = list(asin or []) + _read_lines(asins_file)
+    urls = list(url or []) + _read_lines(urls_file)
+    if not asins and not urls:
+        typer.echo("serve almeno un ASIN o un URL (--asin/--asins-file/--url/--urls-file)")
+        raise typer.Exit(code=2)
+    asyncio.run(
+        _scout_run_async(
+            name=name, asins=asins, urls=urls, category=category, max_products=max_products, evaluate=evaluate
+        )
+    )
+
+
+async def _scout_run_async(
+    *, name: str, asins: list[str], urls: list[str], category: str | None, max_products: int, evaluate: bool
+) -> None:
+    from app.services.brand_deduplication import run_brand_deduplication
+    from app.services.opportunity_engine import run_opportunity_engine
+    from app.services.scoring_engine import run_scoring_engine
+    from app.services.scout_runner import run_scout
+    from app.tools.amazon_scraping.fetcher import PlaywrightPageFetcher
+
+    settings = get_settings()
+    engine, factory = _session_factory(settings)
+    fetcher = PlaywrightPageFetcher(settings)
+    try:
+        async with factory() as session:
+            summary = await run_scout(
+                session,
+                fetcher=fetcher,
+                asins=asins,
+                listing_urls=urls,
+                name=name,
+                category=category,
+                max_products=max_products,
+                commit=True,
+                settings=settings,
+            )
+            if evaluate:
+                dedup = await run_brand_deduplication(session)
+                opp = await run_opportunity_engine(session, settings=settings)
+                scores = await run_scoring_engine(session, settings=settings)
+                await session.commit()
+                typer.echo(f"dedup: merged={len(dedup.merged_pairs)} candidates={dedup.candidates_flagged}")
+                typer.echo(f"opportunities_created: {opp.opportunities_created}")
+                typer.echo(f"scores_created: {scores.scores_created}")
+    finally:
+        await fetcher.close()
+        await engine.dispose()
+
+    typer.echo(f"job_id: {summary.job_id}")
+    typer.echo(f"pages_fetched: {summary.pages_fetched}")
+    typer.echo(f"products_ingested: {summary.products_ingested}/{summary.asins_requested}")
+    typer.echo(f"seller_extraction_rate: {summary.seller_extraction_rate:.0%}")
+    typer.echo(f"sellers_profiled: {summary.sellers_profiled}  vies_checked: {summary.vies_checked}")
+    typer.echo(f"targets: {summary.targets}  non_targets: {summary.non_targets}")
+    if summary.stopped_reason:
+        typer.echo(f"STOPPED: {summary.stopped_reason} -- pausa di almeno 24h e ritmo dimezzato prima di riprovare")
+    typer.echo(f"report: {summary.report_path}")
+
+
+@scout_app.command("vies")
+def scout_vies(
+    vat: str = typer.Argument(..., help="P.IVA con prefisso paese, es. IT01234567890."),
+) -> None:
+    """Verifica una singola P.IVA su VIES (utile per controllare che il
+    servizio risponda dalla macchina su cui gira lo scout)."""
+    from app.tools.vies.client import DEFAULT_BASE_URL, ViesClient
+
+    settings = get_settings()
+    client = ViesClient(base_url=str(settings.scout_config().get("vies_base_url", DEFAULT_BASE_URL)))
+    result = asyncio.run(client.check(vat[:2], vat[2:]))
+    typer.echo(f"vat: {result.country_code}{result.vat_number}")
+    typer.echo(f"valid: {result.is_valid}")
+    typer.echo(f"name: {result.name}")
+    typer.echo(f"address: {result.address}")
+    typer.echo(f"city: {result.city}")
+    if result.error:
+        typer.echo(f"error: {result.error}")
 
 
 if __name__ == "__main__":

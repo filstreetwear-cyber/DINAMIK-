@@ -41,6 +41,7 @@ from app.services.brand_deduplication import (
     DEFAULT_SIMILARITY_THRESHOLD,
     normalize_brand_name,
     run_brand_deduplication,
+    similarity,
 )
 
 # ---------------------------------------------------------------------------
@@ -103,10 +104,8 @@ def test_similarity_threshold_separates_spelling_variants_from_unrelated_names()
     """Calibration check for DEFAULT_SIMILARITY_THRESHOLD itself, so a
     future edit that silently changes the threshold's practical behavior
     gets caught here, not discovered by an actual bad merge."""
-    import difflib
-
     def ratio(a: str, b: str) -> float:
-        return difflib.SequenceMatcher(None, normalize_brand_name(a), normalize_brand_name(b)).ratio()
+        return similarity(normalize_brand_name(a), normalize_brand_name(b))
 
     assert ratio("Acme Kitchenware", "Acme Kitchen Ware") >= DEFAULT_SIMILARITY_THRESHOLD
     assert ratio("Acme Kitchenware", "Zenith Kitchenware") < DEFAULT_SIMILARITY_THRESHOLD

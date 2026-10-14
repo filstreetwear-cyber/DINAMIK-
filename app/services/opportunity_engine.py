@@ -25,7 +25,9 @@ two-tier merge caution):
   (`app/models/amazon.py`), and nothing in Milestone 5's enrichment
   capabilities (`PRODUCT_DATA`/`SELLER_DATA`/`BRAND_DATA`/`SALES_RANK`)
   populates it — not one `AmazonListing` row exists anywhere in this
-  pipeline yet.
+  pipeline yet. **Aggiornamento Anello 1 (2026-10-14)**: lo scout live
+  (`app/services/scout_runner.py`) ora scrive snapshot `AmazonListing`
+  reali; `evaluate_listing_opportunity` qui sotto è implementata.
 * **`ADVERTISING_OPPORTUNITY`** needs ad-sponsorship signals
   (`AmazonListing.sponsored_seen` or real ad spend data) — same gap.
 * **`SELLER_FAST_FIT`** needs Dinamik's own fit criteria for their
@@ -85,6 +87,7 @@ from app.core.config import Settings, get_settings
 from app.models import (
     AgentEvent,
     AgentRun,
+    AmazonListing,
     AmazonProduct,
     AmazonSeller,
     Brand,
@@ -101,6 +104,16 @@ _DEFAULT_PRODUCT_COUNT_HIGH_THRESHOLD = 8
 _DEFAULT_REVIEW_COUNT_HIGH_THRESHOLD = 500
 _DEFAULT_MIN_PAGE_SPEED_SCORE_THRESHOLD = 50
 _DEFAULT_MIN_SEO_SCORE_THRESHOLD = 50
+_DEFAULT_LISTING_RULES: dict[str, float | int | bool] = {
+    "min_image_count": 6,
+    "min_bullet_count": 5,
+    "min_title_length": 60,
+    "max_title_length": 200,
+    "require_video": True,
+    "require_a_plus": True,
+    "min_issues_per_product": 2,
+    "high_weak_share": 0.5,
+}
 
 
 @dataclass
@@ -242,6 +255,75 @@ def evaluate_website_opportunity(website_profile: WebsiteProfile | None, setting
     return RuleResult(level, "mobile_and_performance_signals_v1", reasons)
 
 
+def listing_issues(listing: AmazonListing, cfg: dict[str, object]) -> list[str]:
+    """Problemi concreti di UNA scheda, ciascuno verificabile aprendo
+    l'evidenza (HTML/screenshot) della stessa osservazione."""
+    rules = {**_DEFAULT_LISTING_RULES, **cfg}
+    issues: list[str] = []
+    min_images = int(rules["min_image_count"])  # type: ignore[call-overload]
+    if listing.image_count is not None and listing.image_count < min_images:
+        issues.append(f"immagini={listing.image_count}<{min_images}")
+    bullets = len(listing.bullet_points or [])
+    min_bullets = int(rules["min_bullet_count"])  # type: ignore[call-overload]
+    if bullets < min_bullets:
+        issues.append(f"bullet={bullets}<{min_bullets}")
+    if listing.title_length is not None:
+        if listing.title_length < int(rules["min_title_length"]):  # type: ignore[call-overload]
+            issues.append(f"titolo_corto={listing.title_length}")
+        elif listing.title_length > int(rules["max_title_length"]):  # type: ignore[call-overload]
+            issues.append(f"titolo_lungo={listing.title_length}")
+    if rules["require_video"] and not listing.video_count:
+        issues.append("nessun_video")
+    if rules["require_a_plus"] and not listing.has_a_plus_content:
+        issues.append("nessun_contenuto_A+")
+    return issues
+
+
+def evaluate_listing_opportunity(
+    latest_listings: list[tuple[str, AmazonListing]], settings: Settings
+) -> RuleResult | None:
+    """LISTING_OPPORTUNITY (Anello 1, 2026-10-14) — fino a oggi "non
+    implementabile" perché nessuno scriveva AmazonListing; lo scout live
+    ora lo fa. Input: (ASIN, ultimo snapshot) per ogni prodotto del brand.
+    None se il brand non ha alcuno snapshot (mai osservato dallo scout)."""
+    if not latest_listings:
+        return None
+    cfg = settings.opportunity_rule_config("listing_opportunity")
+    rules = {**_DEFAULT_LISTING_RULES, **cfg}
+    min_issues = int(rules["min_issues_per_product"])  # type: ignore[call-overload]
+    high_share = float(rules["high_weak_share"])  # type: ignore[arg-type]
+
+    reasons: list[str] = []
+    weak = 0
+    for asin, listing in latest_listings:
+        issues = listing_issues(listing, cfg)
+        if len(issues) >= min_issues:
+            weak += 1
+            reasons.append(f"{asin}: " + ", ".join(issues))
+
+    if weak == 0:
+        return RuleResult(OpportunityLevel.NONE, "listing_quality_v1", [])
+    share = weak / len(latest_listings)
+    level = OpportunityLevel.HIGH if share >= high_share else OpportunityLevel.MEDIUM
+    reasons.insert(0, f"schede_deboli={weak}/{len(latest_listings)}")
+    return RuleResult(level, "listing_quality_v1", reasons)
+
+
+async def _latest_listings_for_brand(session: AsyncSession, brand_id: uuid.UUID) -> list[tuple[str, AmazonListing]]:
+    rows = (
+        await session.execute(
+            select(AmazonProduct.asin, AmazonListing)
+            .join(AmazonListing, AmazonListing.product_id == AmazonProduct.id)
+            .where(AmazonProduct.brand_id == brand_id)
+            .order_by(AmazonProduct.asin, AmazonListing.observed_at.desc())
+        )
+    ).all()
+    latest: dict[str, AmazonListing] = {}
+    for asin, listing in rows:
+        latest.setdefault(asin, listing)
+    return list(latest.items())
+
+
 @dataclass
 class BrandOpportunityOutcome:
     brand_id: uuid.UUID
@@ -277,12 +359,15 @@ async def _evaluate_brand(
         await session.execute(select(WebsiteProfile).where(WebsiteProfile.brand_id == brand.id))
     ).scalar_one_or_none()
 
+    latest_listings = await _latest_listings_for_brand(session, brand.id)
+
     outcome = BrandOpportunityOutcome(brand_id=brand.id)
 
     for opportunity_type, rule_result in (
         (OpportunityType.AMAZON, evaluate_amazon_opportunity(list(products), settings)),
         (OpportunityType.BUSINESS_VALUE, evaluate_business_value(list(products), list(sellers), settings)),
         (OpportunityType.WEBSITE, evaluate_website_opportunity(website_profile, settings)),
+        (OpportunityType.LISTING, evaluate_listing_opportunity(latest_listings, settings)),
     ):
         if rule_result is None:
             continue  # no products at all -- nothing to evaluate for this brand

@@ -187,3 +187,20 @@ Questo è il prossimo lavoro concreto di Fase 7, non ancora iniziato.
 - Baseline riverificata in sandbox pulito: 344 passed, 3 skipped (il terzo
   skip è il test Lighthouse reale, CLI non installato qui).
 - Prossima milestone: `docs/architecture/milestone-anello-1-prompt.md`.
+
+## Aggiornamento 2026-10-14 (sera) — Anello 1 implementato
+
+Chiusi nel codice i due gap di ingestion Amazon (Fase 2) e la regola
+`LISTING_OPPORTUNITY`; restano da validare su Amazon.it reale dal PC di casa.
+- Nuovo: parser schede/profili venditore, fetcher Playwright con ritmo e
+  tetto giornaliero (stop al CAPTCHA, mai aggirato), client VIES, ingestion
+  con Evidence per ogni campo, runner con qualificazione target per paese
+  della sede, report di validazione, CLI `dinamik scout run|vies`.
+- Schema: migrazione `e625f69577e0` (campi profilo/P.IVA su `amazon_sellers`,
+  P.IVA/VIES su `companies` con unicità (paese, P.IVA), snapshot storici su
+  `amazon_listings`).
+- `brand_deduplication`: difflib → rapidfuzz (stessi punteggi sugli esempi
+  di calibrazione).
+- Baseline nuova: **374 passed, 3 skipped**, ruff pulito, mypy ai 3 errori
+  noti.
+- Guida: `docs/anello1-installazione.md`.

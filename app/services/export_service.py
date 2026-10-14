@@ -58,13 +58,23 @@ from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.config import Settings, get_settings
-from app.models import AmazonProduct, Brand, Company, Evidence, Opportunity, ResearchResult, Score
+from app.models import (
+    AmazonProduct,
+    AmazonSeller,
+    Brand,
+    Company,
+    Evidence,
+    Opportunity,
+    ResearchResult,
+    Score,
+)
 from app.models.base import utcnow
 from app.models.enums import OpportunityType
 
 _IMPLEMENTED_OPPORTUNITY_TYPES: tuple[str, ...] = (
     OpportunityType.AMAZON.value,
     OpportunityType.BUSINESS_VALUE.value,
+    OpportunityType.LISTING.value,  # Anello 1
 )
 
 _COLUMNS: tuple[str, ...] = (
@@ -89,6 +99,16 @@ _COLUMNS: tuple[str, ...] = (
     "Business value — confidence",
     "Business value — why",
     "Evidence count",
+    # Anello 1 (2026-10-14): colonne prospect in coda, così l'ordine delle
+    # colonne preesistenti non cambia per chi ha già fogli/filtri salvati.
+    "Listing opportunity — level",
+    "Listing opportunity — score",
+    "Listing opportunity — why",
+    "Seller (Amazon)",
+    "Seller target",
+    "P.IVA",
+    "VIES valid",
+    "Company address",
 )
 
 
@@ -109,10 +129,16 @@ class BrandExportRow:
     best_bsr: int | None
     opportunities: dict[str, dict[str, Any]] = field(default_factory=dict)  # opportunity_type -> {level, score, confidence, why}
     evidence_count: int = 0
+    seller_names: str | None = None
+    seller_target: bool | None = None
+    vat: str | None = None
+    vies_valid: bool | None = None
+    company_address: str | None = None
 
     def as_worksheet_row(self) -> list[Any]:
         amazon = self.opportunities.get(OpportunityType.AMAZON.value, {})
         business = self.opportunities.get(OpportunityType.BUSINESS_VALUE.value, {})
+        listing = self.opportunities.get(OpportunityType.LISTING.value, {})
         return [
             self.brand_name,
             self.company_name,
@@ -135,6 +161,14 @@ class BrandExportRow:
             business.get("confidence"),
             business.get("why"),
             self.evidence_count,
+            listing.get("level"),
+            listing.get("score"),
+            listing.get("why"),
+            self.seller_names,
+            self.seller_target,
+            self.vat,
+            self.vies_valid,
+            self.company_address,
         ]
 
 
@@ -254,9 +288,14 @@ async def build_brand_export_rows(
     rows: list[BrandExportRow] = []
     for brand in brands:
         company_name: str | None = None
+        company: Company | None = None
         if brand.company_id is not None:
             company = await session.get(Company, brand.company_id)
             company_name = company.legal_name if company is not None else None
+        sellers = (
+            (await session.execute(select(AmazonSeller).where(AmazonSeller.brand_id == brand.id))).scalars().all()
+        )
+        seller_flags = [s.is_target for s in sellers if s.is_target is not None]
 
         product_stats = await _product_stats_for_brand(session, brand.id)
         opportunities_by_type = await _latest_opportunities_by_type(session, brand.id)
@@ -293,6 +332,11 @@ async def build_brand_export_rows(
                 best_bsr=product_stats["best_bsr"],
                 opportunities=opportunities,
                 evidence_count=evidence_count,
+                seller_names=", ".join(s.seller_name for s in sellers) or None,
+                seller_target=any(seller_flags) if seller_flags else None,
+                vat=f"{company.vat_country}{company.vat_number}" if company and company.vat_number else None,
+                vies_valid=company.vies_valid if company else None,
+                company_address=company.address if company else None,
             )
         )
     return rows

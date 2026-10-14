@@ -41,6 +41,25 @@ class AmazonSeller(UUIDPrimaryKeyMixin, Base):
     first_seen_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
     last_seen_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
 
+    # Anello 1 (2026-10-14): dati della pagina profilo venditore
+    # (/sp?seller=ID, blocco "Informazioni dettagliate sul venditore") e
+    # collegamento all'azienda legale verificata via VIES. Tutti nullable:
+    # un seller visto solo sulla scheda prodotto non li ha ancora.
+    is_amazon: Mapped[bool] = mapped_column(Boolean, default=False)
+    business_name: Mapped[str | None] = mapped_column(String(255), nullable=True)
+    business_address: Mapped[str | None] = mapped_column(String(1000), nullable=True)
+    business_country: Mapped[str | None] = mapped_column(String(2), nullable=True, index=True)
+    vat_number: Mapped[str | None] = mapped_column(String(20), nullable=True, index=True)
+    vat_country: Mapped[str | None] = mapped_column(String(2), nullable=True)
+    profile_checked_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    company_id: Mapped[uuid.UUID | None] = mapped_column(
+        ForeignKey("companies.id", ondelete="SET NULL"), nullable=True, index=True
+    )
+    # None = non ancora qualificato; True/False deciso da scout_runner in
+    # base al paese della sede (config scout.target_countries).
+    is_target: Mapped[bool | None] = mapped_column(Boolean, nullable=True)
+    target_reason: Mapped[str | None] = mapped_column(String(255), nullable=True)
+
     brand: Mapped[Brand | None] = relationship(back_populates="sellers")
 
 
@@ -88,5 +107,18 @@ class AmazonListing(UUIDPrimaryKeyMixin, TimestampMixin, Base):
     video_count: Mapped[int | None] = mapped_column(nullable=True)
     sponsored_seen: Mapped[bool] = mapped_column(Boolean, default=False)
     observed_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
+
+    # Anello 1 (2026-10-14): una riga per osservazione = storico gratuito
+    # di BSR/prezzo/recensioni (il "mini-Keepa") + puntatori alle evidenze
+    # grezze su disco (HTML e screenshot della scheda).
+    title_length: Mapped[int | None] = mapped_column(nullable=True)
+    image_urls: Mapped[list | None] = mapped_column(JSONB, nullable=True)
+    price: Mapped[float | None] = mapped_column(Numeric(10, 2), nullable=True)
+    rating: Mapped[float | None] = mapped_column(Numeric(2, 1), nullable=True)
+    review_count: Mapped[int | None] = mapped_column(nullable=True)
+    bsr: Mapped[int | None] = mapped_column(nullable=True)
+    bsr_category: Mapped[str | None] = mapped_column(String(255), nullable=True)
+    html_path: Mapped[str | None] = mapped_column(String(500), nullable=True)
+    screenshot_path: Mapped[str | None] = mapped_column(String(500), nullable=True)
 
     product: Mapped[AmazonProduct] = relationship(back_populates="listings")

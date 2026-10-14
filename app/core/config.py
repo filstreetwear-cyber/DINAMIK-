@@ -148,6 +148,12 @@ class Settings(BaseSettings):
     # pattern invented for this one feature.
     exports_dir: str = Field(default="exports", alias="EXPORTS_DIR")
 
+    # Anello 1 (2026-10-14): dove lo scout salva le evidenze grezze (HTML
+    # di ogni pagina, screenshot delle schede). Stessa forma degli altri
+    # dir generati: relativo al repo, sovrascrivibile, isolato nei test.
+    scout_evidence_dir: str = Field(default="data/evidence", alias="SCOUT_EVIDENCE_DIR")
+    scout_reports_dir: str = Field(default="reports/anello1", alias="SCOUT_REPORTS_DIR")
+
     # 2026-09-22 (post Reality Audit, Docker->Ollama networking fix): the
     # Reality Audit (§12/§18) found a real, unaddressed deploy gap --
     # config/default.yaml's ai.local.base_url defaults to
@@ -267,6 +273,12 @@ class Settings(BaseSettings):
         wired to anything by this milestone either, honestly, same as
         before it."""
         return dict(self.yaml_config.get("scheduler", {}))
+
+    def scout_config(self) -> dict[str, Any]:
+        """config/default.yaml's `scout:` section (Anello 1): ritmo delle
+        richieste, tetto giornaliero, paesi target, endpoint VIES. Sezione
+        mancante = default in codice (app/services/scout_runner.py)."""
+        return dict(self.yaml_config.get("scout", {}))
 
     def weekly_scan_config(self) -> dict[str, Any]:
         """config/default.yaml's `weekly_scan:` section -- the Weekly
