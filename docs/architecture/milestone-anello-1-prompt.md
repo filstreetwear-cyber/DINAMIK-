@@ -56,13 +56,31 @@ seller?": la risposta è no. Invece:
 4. Disciplina di accesso: 1 richiesta ogni 8–15 s randomizzati, massimo
    ~200 pagine/giorno, rilevamento CAPTCHA/robot-check → stop del batch e
    log, mai retry aggressivi. Niente proxy a pagamento in questa milestone.
-5. **Gate di validazione** su 20–30 ASIN reali di una sola nicchia
-   (scegliere con Fil una categoria con molti brand piccoli italiani):
+5. **Gate di validazione** su 20–30 ASIN reali. Nicchie decise (14/10),
+   scelte come proxy di un acquirente 30–60 anni (Amazon non espone dati
+   demografici degli acquirenti, quindi l'età non è filtrabile: si sceglie
+   la categoria). Primo campione: **Casa e cucina** (organizzazione casa,
+   pulizia, piccoli accessori cucina). Nicchie successive, una alla volta:
+   Giardino, Fai da te, Cura della persona/benessere, Prodotti per animali.
+   Punto di partenza: Bestseller e "Novità" della sottocategoria, pagine
+   2–5 (le prime posizioni sono quasi tutte Amazon o grandi brand).
    produrre `reports/anello1/validation.md` con tabella ASIN → seller
    estratto → brand → esito; controllare a mano almeno 10 righe aprendo le
    pagine. Soglia per proseguire: ≥80% seller corretti e <10% CAPTCHA.
    Se non passa, fermati e riporta numeri e HTML di esempio — non
    "aggiustare" i parser finché i numeri tornano.
+6. **Filtro prospect**: dalla pagina seller ricavare il paese dell'indirizzo
+   aziendale. Prospect = sede in Italia (poi UE). In Casa e cucina la
+   maggioranza dei seller è probabilmente extra-UE: vanno salvati ma marcati
+   `non_target`, non cancellati, così si misura la resa reale della nicchia.
+7. **CAPTCHA**: nessun tentativo di risolverlo o aggirarlo (né OCR, né
+   modelli di visione, né servizi esterni). Un CAPTCHA è il segnale che il
+   ritmo è troppo alto: stop del batch, pausa di almeno 24 h, ritmo dimezzato.
+8. **Da dove gira lo scraper**: preferire una macchina su connessione
+   residenziale/ufficio (PC di Frank o un mini-PC acceso in ufficio) che
+   scrive nel Postgres del server OVH via tunnel SSH. Gli IP dei datacenter
+   OVH vengono bloccati da Amazon molto prima di quelli residenziali.
+   Niente proxy gratuiti (inaffidabili e a rischio sicurezza) né Tor.
 
 `SELLER_DATA` va dichiarata supportata dal provider solo dopo che il gate passa.
 
