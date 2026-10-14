@@ -19,6 +19,18 @@ evidenze → prospect esportabile in .xlsx**
 Fuori scope (non toccarli): Ollama/AI locale, AIAdvisor/OutreachWriter,
 health-check Fase 7, Keepa/Helium10, nuovi agenti.
 
+### Topologia (decisa il 14/10)
+
+- **PC di casa (connessione residenziale)** = solo scraper. Un solo PC alla
+  volta: più PC sulla stessa linea hanno lo stesso IP, quindi non aumentano
+  la capacità, aumentano solo il rischio di blocco.
+- **Server OVH** = PostgreSQL, API, export, analisi. Lo scraper non gira mai
+  da qui.
+- Collegamento PC → Postgres OVH tramite rete privata (Tailscale, piano
+  gratuito, oppure tunnel SSH). La porta 5432 di Postgres **non** va mai
+  esposta su internet.
+- Lo Step 0 va eseguito su entrambe le macchine.
+
 ### Step 0 — Verifica stato, senza sovrascrivere nulla
 
 1. Se sul server esiste già una copia del progetto: `git status`, `git log -5`,
@@ -52,7 +64,15 @@ seller?": la risposta è no. Invece:
    indirizzo, P.IVA quando presenti (obbligo informativo UE). È il dato che
    trasforma un "seller name" in un'azienda contattabile.
 3. Salva **sempre** l'HTML grezzo di ogni pagina come evidenza (path + URL +
-   timestamp), così ogni campo è verificabile a posteriori.
+   timestamp), così ogni campo è verificabile a posteriori. Salva anche gli
+   URL di tutte le immagini della galleria e il valore del BSR con data
+   (ogni nuova scansione aggiunge una riga: è l'inizio dello storico).
+   **Screenshot** (Playwright) della scheda come la vede il cliente:
+   parte visibile senza scroll + immagine principale, **solo per i prospect
+   target** (sede in Italia/UE), non per tutti gli ASIN. Salvati con
+   lo stesso legame all'`Evidence` della pagina. Servono per la revisione
+   visiva successiva (umana o con Claude), non vengono analizzati in
+   automatico in questa milestone.
 4. Disciplina di accesso: 1 richiesta ogni 8–15 s randomizzati, massimo
    ~200 pagine/giorno, rilevamento CAPTCHA/robot-check → stop del batch e
    log, mai retry aggressivi. Niente proxy a pagamento in questa milestone.
@@ -113,6 +133,15 @@ merge). Idempotente: rilanciare lo stesso batch non crea duplicati
 `dinamik export brands` esistente, esteso con: ragione sociale/P.IVA/
 indirizzo dalla pagina seller, motivi dell'opportunità, link alle evidenze.
 Consegna: `.xlsx` con i prospect del campione, ordinati per score.
+
+### Dopo questa milestone (non ora): funzioni "stile Helium10" costruite in casa
+
+Non si copia né si fa reverse engineering di Helium10: si ricostruiscono
+solo le due funzioni che servono allo Scout, con dati propri.
+- **Storico**: riscansione settimanale degli ASIN dei prospect target →
+  andamento di BSR, prezzo, recensioni nel tempo (un mini-Keepa nostro).
+- **Stima vendite da BSR**: curva per categoria, usata solo per fasce
+  (piccolo / medio / grande venditore), mai come numero preciso nei report.
 
 ### Regole di lavoro
 
