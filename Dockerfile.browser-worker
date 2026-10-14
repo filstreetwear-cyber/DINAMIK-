@@ -1,0 +1,53 @@
+# Phase J (Docker/VPS): the `browser-worker` service image.
+#
+# Separate from the api image on purpose: this is the only service that
+# needs an actual Chromium binary and its runtime library dependencies —
+# bundling that into the api image would bloat every deploy of the
+# service that never launches a browser. See app/workers/browser_worker.py
+# for what this container's process actually does today (a healthcheck
+# proving the browser toolchain works, not yet a task consumer —
+# Milestone 14).
+FROM python:3.12-slim
+
+ENV PYTHONDONTWRITEBYTECODE=1 \
+    PYTHONUNBUFFERED=1 \
+    PIP_NO_CACHE_DIR=1 \
+    PLAYWRIGHT_BROWSERS_PATH=/opt/pw-browsers
+
+WORKDIR /app
+
+# curl for the Docker healthcheck. Chromium's own runtime libraries
+# (fonts, libnss, libatk, ...) are installed below via `playwright install
+# --with-deps` rather than a hand-maintained apt list here — this image
+# has never actually been built in this sandbox (no Docker daemon
+# available, see docs/architecture.md's Phase J addendum), so trusting
+# Playwright's own officially-maintained dependency list is more honest
+# than a manually curated one I have no way to verify is complete.
+RUN apt-get update \
+    && apt-get install -y --no-install-recommends curl \
+    && rm -rf /var/lib/apt/lists/*
+
+# Same editable-install reasoning as Dockerfile (api) — see its comment.
+COPY . .
+RUN pip install -e . \
+    && playwright install --with-deps chromium \
+    && chromium_dir="$(find "$PLAYWRIGHT_BROWSERS_PATH" -maxdepth 1 -type d -name 'chromium-*' | sort | tail -n1)" \
+    && test -n "$chromium_dir" \
+    && ln -s "${chromium_dir}/chrome-linux/chrome" "$PLAYWRIGHT_BROWSERS_PATH/chromium"
+# The symlink above deliberately matches app/tools/browser/engine.py's
+# hardcoded _DEFAULT_EXECUTABLE_PATH ("/opt/pw-browsers/chromium") — same
+# convention as the development sandbox this project was built in — so
+# BROWSER_EXECUTABLE_PATH does not need to be set for this image at all.
+# It exists (app/core/config.py) as the escape hatch for whenever that
+# stops being true (a different base image, a Playwright version that
+# changes its install layout).
+
+ENV BROWSER_PROFILES_DIR=/data/browser_profiles
+VOLUME ["/data/browser_profiles"]
+
+EXPOSE 8100
+
+HEALTHCHECK --interval=15s --timeout=10s --start-period=20s --retries=5 \
+    CMD curl -f http://localhost:8100/health || exit 1
+
+CMD ["uvicorn", "app.workers.browser_worker:app", "--host", "0.0.0.0", "--port", "8100"]

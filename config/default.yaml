@@ -1,0 +1,212 @@
+marketplaces:
+  - IT
+  - DE
+  - FR
+  - ES
+  - UK
+  - US
+
+default_marketplace: IT
+
+scoring:
+  weights:
+    amazon_opportunity: 0.25
+    listing_opportunity: 0.20
+    advertising_opportunity: 0.15
+    website_opportunity: 0.15
+    seller_fast_fit: 0.10
+    business_value: 0.15
+  confidence:
+    increase_on:
+      - multiple_sources_agree
+      - recent_data
+      - direct_data
+      - verifiable_data
+    decrease_on:
+      - estimated_data
+      - conflicting_sources
+      - stale_data
+      - incomplete_information
+      - ai_inference
+
+# Milestone 8: thresholds for app/services/opportunity_engine.py's
+# deterministic rules. Only two of the six OpportunityType values
+# (amazon_opportunity, business_value) have real rules today -- the other
+# four need data this pipeline doesn't produce yet (listing content,
+# ad-sponsorship signals, brand website WEBSITE_DATA, Seller-Fast-specific
+# fit criteria that were never specified). See the module's own docstring.
+opportunity_rules:
+  amazon_opportunity:
+    min_rating_threshold: 4.2
+    min_review_count_threshold: 50
+  business_value:
+    product_count_medium_threshold: 3
+    product_count_high_threshold: 8
+    review_count_high_threshold: 500
+  website_opportunity:
+    min_page_speed_score_threshold: 50
+    min_seo_score_threshold: 50
+
+retry:
+  network_error:
+    max_attempts: 3
+    backoff: fixed
+  rate_limit:
+    max_attempts: 5
+    backoff: exponential
+  auth_error:
+    max_attempts: 0
+  invalid_request:
+    max_attempts: 0
+  ai_timeout:
+    max_attempts: 2
+    backoff: fixed
+
+rate_limits:
+  keepa:
+    requests_per_minute: 60
+  junglescout:
+    requests_per_minute: 30
+  perpetua:
+    requests_per_minute: 30
+  helium10:
+    requests_per_minute: 30
+  ai:
+    requests_per_minute: 50
+
+# Milestone 9.5: local-first AI layer. Restructured from the previous
+# unused default_model/max_tokens/temperature shape (nothing read those
+# keys -- confirmed by grep before this change) -- see
+# docs/architecture/local-ai.md for the full rationale. `local` is the only
+# implemented provider this milestone (section 4/24: zero mandatory API
+# cost, no paid fallback); `cloud.enabled: false` is enforced at wiring
+# time (app/ai/router.py raises AICloudNotImplementedError), not just
+# documented here.
+ai:
+  enabled: true
+  provider: local
+  local:
+    backend: ollama
+    base_url: http://localhost:11434
+    model: qwen3:1.7b
+    timeout_seconds: 60
+    max_concurrency: 1
+    temperature: 0.2
+    num_ctx: 2048
+    num_predict: 512
+    keep_alive: 5m
+  cloud:
+    enabled: false
+
+scheduler:
+  enabled: false
+  research_job_cron: "0 8 * * 1"
+
+# Weekly Intelligence Scan feature (built 2026-09-21, on top of
+# Milestones 1-14). A DIFFERENT, additive capability from `scheduler:`
+# above, not a replacement -- `scheduler.research_job_cron` is a generic
+# "run a fresh discovery pipeline periodically" trigger with no defined
+# business purpose (a placeholder from Milestone 14); this section is the
+# real, specified weekly intelligence scan (change detection against
+# prior snapshots, opportunity lifecycle tracking, a persisted report),
+# on its own schedule. `enabled: false` deliberately, even though the
+# feature that requested this section gave `enabled: true` as an EXAMPLE
+# config shape -- that same request's own section 40/45 says not to turn
+# the scheduler on until a manual run has been validated for real, and
+# the only manual runs so far are in this sandbox against mock providers,
+# not Frank's VPS. Flip this once a real `dinamik scan weekly` run has
+# been checked by a human.
+weekly_scan:
+  enabled: false
+  day: sunday
+  time: "06:00"
+  timezone: "Europe/Rome"
+  # 2026-09-22 (post Reality Audit, "controlled real weekly intelligence"
+  # implementation pass): which category the scan's underlying discovery
+  # pipeline (run_research_pipeline, via a ResearchJob) searches. This was
+  # the one BUSINESS_DECISION_REQUIRED gap the Reality Audit flagged for
+  # this section (§26/§15 of that audit) -- Fil confirmed the first real
+  # value directly: "Casa e cucina" (matches the only category the mock
+  # fixture (fixtures/amazon_mock_products.json) actually has, so this
+  # changes nothing for existing MOCK_MODE=true tests/runs). Only the
+  # FIRST entry is used today (app/services/weekly_scan.py picks
+  # categories[0]) -- a list, not a single string, because a future
+  # multi-category scan is the natural next step once one category is
+  # validated end to end, and that should be a config change, not a code
+  # change. Outside MOCK_MODE, an empty list is a hard, explicit
+  # SCAN_CONFIGURATION_REQUIRED error (see weekly_scan.py) rather than a
+  # silent scan of an arbitrary/undefined category.
+  categories:
+    - "Casa e cucina"
+  # Significance thresholds -- not arbitrary in the sense of "picked
+  # without thought", but not calibrated against real outcome data either
+  # (none exists yet, same honest limit scoring_engine.py's own docstring
+  # already states for its level->score mapping). Rationale per threshold:
+  significance:
+    # Amazon's own rating field has 0.1 precision; a swing below ~0.3
+    # points is well within normal week-to-week noise for a low-volume
+    # product and would flag on every run, defeating the point of a
+    # SIGNIFICANCE layer.
+    rating_change_threshold: 0.3
+    # Review counts are cumulative and only grow in the real Amazon UI
+    # (removals are rare/manual) -- a double-digit percentage jump in a
+    # week is a real signal (a promotion, a viral moment), a handful of
+    # new reviews on a low-volume product is not.
+    review_growth_pct_threshold: 10.0
+    # BSR is the noisiest field Amazon exposes (it moves with every sale,
+    # every competitor's sale, and category traffic) -- a much larger bar
+    # than rating/reviews is needed before a rank move means something
+    # rather than daily jitter.
+    rank_change_pct_threshold: 20.0
+    # Score is 0-100 (scoring_engine.py's _LEVEL_TO_SCORE); a full level
+    # step (e.g. MEDIUM 60 -> HIGH 90, or LOW 25 -> MEDIUM 60) is at least
+    # a ~30-35 point jump, so a threshold around half that catches a real
+    # movement within one level, not just noise from a single review
+    # tipping the rating/review rule across its own threshold.
+    opportunity_score_delta_threshold: 15.0
+
+cache:
+  default_ttl_seconds: 86400
+
+data_freshness:
+  stale_after_days: 14
+
+# Phase H (refactor 21/09): per-provider config the ProviderRegistry uses
+# to order/fallback providers, instead of priority being hardcoded at
+# registration call sites. `mode` is validated but not yet consumed by any
+# provider — reserved for Phase G, when Helium10Provider variants
+# (api/browser/manual) exist and need to pick one from config. `cost_model`
+# is a coarse tier (free < mock < cheap < paid), not a real currency
+# amount — nobody has real per-call pricing yet; see
+# app/tools/core/registry.py for the ranking and its rationale.
+providers:
+  website_intelligence:
+    enabled: true
+    mode: api  # "api" here means "the provider's own acquisition logic", not literally a REST API — see provider.py
+    priority: 10
+    cost_model: free
+  amazon:
+    enabled: true
+    mode: api
+    priority: 20
+    cost_model: mock
+  keepa:
+    enabled: true
+    mode: api
+    priority: 30
+    cost_model: mock
+  junglescout:
+    enabled: false
+    mode: disabled
+    priority: 90
+    cost_model: unknown
+  perpetua:
+    enabled: false
+    mode: disabled
+    priority: 90
+    cost_model: unknown
+  helium10:
+    enabled: false
+    mode: disabled  # sospeso — vedi docs/architecture.md addendum 21/09
+    priority: 100
+    cost_model: unknown

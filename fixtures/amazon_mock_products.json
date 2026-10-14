@@ -1,0 +1,31 @@
+{
+  "_comment": "Fixture data for AmazonProvider in MOCK_MODE. Fabricated ASINs/numbers — never real Amazon data. Every ProviderResult built from this file carries is_mock=true.",
+  "B0MOCK0001": {
+    "asin": "B0MOCK0001",
+    "marketplace": "IT",
+    "title": "Mock Product — Ceramic Coffee Grinder",
+    "brand": "MockBrand Kitchenware",
+    "seller_id": "MOCKSELLER01",
+    "seller_name": "MockBrand Kitchenware Srl",
+    "price": 39.99,
+    "currency": "EUR",
+    "bsr": 1250,
+    "category": "Casa e cucina",
+    "rating": 4.3,
+    "review_count": 812
+  },
+  "B0MOCK0002": {
+    "asin": "B0MOCK0002",
+    "marketplace": "IT",
+    "title": "Mock Product — Insulated Steel Water Bottle 1L",
+    "brand": "MockBrand Kitchenware",
+    "seller_id": "MOCKSELLER01",
+    "seller_name": "MockBrand Kitchenware Srl",
+    "price": 24.5,
+    "currency": "EUR",
+    "bsr": 430,
+    "category": "Casa e cucina",
+    "rating": 4.6,
+    "review_count": 2301
+  }
+}

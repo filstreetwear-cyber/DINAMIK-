@@ -1,0 +1,225 @@
+# Phase J (Docker/VPS) — refactor doc: "docker-compose, browser-worker,
+# volumes, healthchecks". Updated for Milestone 14 (Workers + scheduler):
+# `app/workers/celery_app.py` is now real, so the `worker`/`beat` services
+# this file's own comment previously deferred are added below.
+#
+# * postgres, redis — real infra dependencies already in pyproject.toml/
+#   .env.example. redis is no longer just declared-but-unused: it is now
+#   the real Celery broker/result backend for `worker`/`beat`.
+# * api — the FastAPI app (app/main.py). Runs migrations on boot via
+#   scripts/docker-entrypoint-api.sh, then serves the app. Still the only
+#   service that runs migrations — see `worker`/`beat` below for why.
+# * worker — `celery -A app.workers.celery_app worker`, the same command
+#   Makefile's `run-worker` target has declared since Milestone 1. Reuses
+#   the `api` image (Dockerfile) via `build:` — no separate worker
+#   Dockerfile: a Celery worker for app/workers/tasks.py needs Python +
+#   DB + Redis access, nothing browser-specific, so a second image would
+#   duplicate the first for no reason (unlike browser-worker, which
+#   genuinely needs its own Chromium install).
+# * beat — `celery -A app.workers.celery_app beat`, the periodic
+#   scheduler process. A SEPARATE service/container from `worker`, not
+#   `worker -B`: running beat embedded in a worker process is fine for a
+#   single-worker dev setup but breaks the moment a second worker replica
+#   is added (two embedded schedulers would double-fire every periodic
+#   task) — a dedicated `beat` service is the one that scales safely,
+#   costs nothing extra today, and matches Celery's own documented
+#   recommendation.
+# * worker/beat entrypoint: neither reuses api's
+#   scripts/docker-entrypoint-api.sh (`entrypoint: []` below) — that
+#   script's job is running Alembic migrations, and having three
+#   containers race to apply the same migration on every boot is a
+#   problem this project doesn't need to solve when one already-healthy
+#   `api` service can own it; `depends_on: api: condition:
+#   service_healthy` is what guarantees the schema exists first.
+# * browser-worker — unchanged: a separate image with a real Chromium
+#   install (see Dockerfile.browser-worker) and its own persistent volume
+#   for BROWSER_PROFILES_DIR. Its process (app/workers/browser_worker.py)
+#   is still a healthcheck, not a BrowserTask queue consumer — nothing in
+#   this codebase creates a BrowserTask row yet (confirmed by grep before
+#   this milestone), so building that consumer now would be exactly the
+#   "looks done, isn't" shortcut this project keeps not taking. `worker`
+#   below consumes ResearchJob pipeline work, the queue that actually has
+#   real tasks.
+services:
+  postgres:
+    image: postgres:16-alpine
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: dinamik
+      POSTGRES_PASSWORD: dinamik
+      POSTGRES_DB: dinamik_amazon_intelligence
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U dinamik -d dinamik_amazon_intelligence"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+  redis:
+    image: redis:7-alpine
+    restart: unless-stopped
+    volumes:
+      - redis_data:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+  api:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    restart: unless-stopped
+    env_file:
+      - .env
+    environment:
+      # Override .env's localhost-oriented defaults with the compose
+      # network's service hostnames — env_file values are supplied first,
+      # this block wins on conflicting keys.
+      DATABASE_URL: postgresql+asyncpg://dinamik:dinamik@postgres:5432/dinamik_amazon_intelligence
+      REDIS_URL: redis://redis:6379/0
+      # 2026-09-22 (post Reality Audit, §12/§18): Ollama is assumed to run
+      # on the Docker HOST (there is deliberately no `ollama:` compose
+      # service -- see docs/architecture.md), so `localhost:11434` (the
+      # ai.local.base_url default) would resolve to this container itself,
+      # not the host. `host.docker.internal` + the `extra_hosts` entry
+      # below is the standard Linux Docker fix (Docker Desktop already
+      # resolves it without the extra_hosts entry; the entry is harmless
+      # there). Override with a real value here or in .env once Ollama's
+      # actual reachable address on the target VPS is known -- this
+      # default is a reasonable guess, not verified against a real VPS
+      # (the Reality Audit's own §12/§18 finding: this repo has never had
+      # a Docker daemon available to test it against).
+      OLLAMA_BASE_URL: ${OLLAMA_BASE_URL:-http://host.docker.internal:11434}
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    volumes:
+      # 2026-09-22 (post Reality Audit, §16/§29): exports/ and
+      # reports/weekly/ (Settings.exports_dir/weekly_reports_dir, both
+      # relative to WORKDIR /app -- see Dockerfile) had NO volume at all
+      # before this change, so a container recreation silently lost every
+      # .xlsx export and every weekly intelligence report. Shared with
+      # `worker` (the container that actually writes weekly reports via
+      # the Celery task) so both see the same files regardless of which
+      # container a `dinamik export`/`dinamik scan weekly` command runs in.
+      - dinamik_exports:/app/exports
+      - dinamik_reports:/app/reports
+    ports:
+      - "8000:8000"
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8000/health"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 15s
+
+  worker:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    restart: unless-stopped
+    entrypoint: []
+    command: ["celery", "-A", "app.workers.celery_app", "worker", "--loglevel=info"]
+    env_file:
+      - .env
+    environment:
+      DATABASE_URL: postgresql+asyncpg://dinamik:dinamik@postgres:5432/dinamik_amazon_intelligence
+      REDIS_URL: redis://redis:6379/0
+      OLLAMA_BASE_URL: ${OLLAMA_BASE_URL:-http://host.docker.internal:11434}
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    volumes:
+      - dinamik_exports:/app/exports
+      - dinamik_reports:/app/reports
+    depends_on:
+      api:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    healthcheck:
+      # 2026-09-22 (post Reality Audit, §15/§28): this service previously
+      # had NO healthcheck at all. `celery inspect ping` is Celery's own
+      # documented liveness probe -- it round-trips through the real
+      # broker (Redis), so it also catches a worker that started but can't
+      # reach Redis, not just a dead process.
+      test: ["CMD-SHELL", "celery -A app.workers.celery_app inspect ping -d celery@$$HOSTNAME || exit 1"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 20s
+
+  beat:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    restart: unless-stopped
+    entrypoint: []
+    command: ["celery", "-A", "app.workers.celery_app", "beat", "--loglevel=info"]
+    env_file:
+      - .env
+    environment:
+      DATABASE_URL: postgresql+asyncpg://dinamik:dinamik@postgres:5432/dinamik_amazon_intelligence
+      REDIS_URL: redis://redis:6379/0
+      OLLAMA_BASE_URL: ${OLLAMA_BASE_URL:-http://host.docker.internal:11434}
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    depends_on:
+      api:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    healthcheck:
+      # 2026-09-22 (post Reality Audit, §15/§28): beat has no network
+      # endpoint to probe (it only writes schedule state to disk/Redis),
+      # so this only confirms the process itself is alive, not that it is
+      # ticking correctly -- a real Beat schedule verification still needs
+      # a running instance observed over wall-clock time (Reality Audit
+      # §14/§17), which this healthcheck does not and cannot replace.
+      test: ["CMD-SHELL", "pgrep -f 'celery.*beat' || exit 1"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 15s
+
+  browser-worker:
+    build:
+      context: .
+      dockerfile: Dockerfile.browser-worker
+    restart: unless-stopped
+    # Deliberately NOT `env_file: .env` — this container drives a real
+    # browser and listens on its own port; it gets only the settings it
+    # actually reads, not ANTHROPIC_API_KEY/AMAZON_API_SECRET/
+    # HELIUM10_API_KEY/etc. wholesale. Same "never hand out secrets a
+    # component doesn't need" discipline the spec already applies to what
+    # ToolCall logs (section 13), applied here to what a container is even
+    # handed.
+    environment:
+      MOCK_MODE: ${MOCK_MODE:-true}
+      ENVIRONMENT: ${ENVIRONMENT:-production}
+      LOG_LEVEL: ${LOG_LEVEL:-INFO}
+      BROWSER_HEADLESS: ${BROWSER_HEADLESS:-true}
+      BROWSER_PROFILES_DIR: /data/browser_profiles
+    volumes:
+      - browser_profiles:/data/browser_profiles
+    ports:
+      - "8100:8100"
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8100/health"]
+      interval: 15s
+      timeout: 10s
+      retries: 5
+      start_period: 20s
+
+volumes:
+  postgres_data:
+  redis_data:
+  browser_profiles:
+  dinamik_exports:
+  dinamik_reports:

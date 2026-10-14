@@ -1,0 +1,5 @@
+scheduler:
+  enabled: false
+
+cache:
+  default_ttl_seconds: 300
