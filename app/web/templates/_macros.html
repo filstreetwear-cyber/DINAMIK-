@@ -1,0 +1,34 @@
+{% macro level(value) -%}
+{% if value %}<span class="badge {{ value }}">{{ {'HIGH': 'Alta', 'MEDIUM': 'Media', 'LOW': 'Bassa', 'NONE': 'Nessuna', 'POSSIBLE': 'Possibile'}.get(value, value) }}</span>{% else %}<span class="muted">—</span>{% endif %}
+{%- endmacro %}
+
+{% macro status(value) -%}
+<span class="badge {{ value }}">{{ STATUS_LABELS.get(value, value) }}</span>
+{%- endmacro %}
+
+{% macro prospect_table(rows) -%}
+<div class="table-wrap">
+<table>
+  <thead><tr>
+    <th>Brand</th><th>Azienda</th><th>Città</th><th>Schede</th><th>Opp. schede</th><th>Punteggio</th><th>Sito</th><th>Stato</th>
+  </tr></thead>
+  <tbody>
+  {% for r in rows %}
+    <tr>
+      <td><a href="/ui/prospects/{{ r.brand_id }}"><strong>{{ r.brand_name }}</strong></a>
+        <div class="muted small">{{ r.seller_names | join(', ') }}</div></td>
+      <td>{{ r.company_name or '—' }}<div class="muted small">{{ r.vat or '' }}</div></td>
+      <td>{{ r.city or '—' }}</td>
+      <td>{{ r.product_count }}</td>
+      <td>{{ level(r.listing_level) }}</td>
+      <td>{{ r.score if r.score is not none else '—' }}</td>
+      <td>{% if r.website %}<a href="{{ r.website }}" target="_blank" rel="noopener">sito</a>{% else %}<span class="muted">—</span>{% endif %}</td>
+      <td>{{ status(r.status) }}</td>
+    </tr>
+  {% else %}
+    <tr><td colspan="8" class="muted">Nessun prospect. Lancia una scansione dal PC di casa: <code>dinamik scout run</code>.</td></tr>
+  {% endfor %}
+  </tbody>
+</table>
+</div>
+{%- endmacro %}

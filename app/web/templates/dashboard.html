@@ -1,0 +1,25 @@
+{% extends "base.html" %}
+{% from "_macros.html" import prospect_table %}
+{% block title %}Panoramica — Dinamik Advisor{% endblock %}
+{% block content %}
+<h1>Panoramica</h1>
+<div class="grid kpi">
+  <div class="card"><div class="value">{{ counts.targets }}</div><div class="label">Prospect target (sede IT)</div></div>
+  <div class="card"><div class="value">{{ counts.companies_verified }}</div><div class="label">Aziende verificate VIES</div></div>
+  <div class="card"><div class="value">{{ counts.with_website }}</div><div class="label">Brand con sito trovato</div></div>
+  <div class="card"><div class="value">{{ counts.approved }}</div><div class="label">Approvati</div></div>
+  <div class="card"><div class="value">{{ counts.contacted }}</div><div class="label">Contattati</div></div>
+  <div class="card"><div class="value">{{ counts.products }}</div><div class="label">Schede analizzate</div></div>
+</div>
+
+<div class="card">
+  <h2>Prospect migliori</h2>
+  <p class="muted small">Ordinati per opportunità sulle schede, poi per punteggio. <a href="/ui/prospects">Vedi tutti</a></p>
+  {{ prospect_table(top) }}
+</div>
+
+<div class="card">
+  <h2>Ultime scansioni</h2>
+  {% include "_runs_table.html" %}
+</div>
+{% endblock %}

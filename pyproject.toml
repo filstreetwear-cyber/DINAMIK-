@@ -27,6 +27,8 @@ dependencies = [
     "tenacity>=8.5",
     "openpyxl>=3.1",
     "rapidfuzz>=3.9",  # Anello 1: similarita' nomi brand (brand_deduplication)
+    "jinja2>=3.1",  # interfaccia web /ui
+    "python-multipart>=0.0.9",  # form dell'interfaccia web
 ]
 
 [project.optional-dependencies]
@@ -49,6 +51,9 @@ build-backend = "setuptools.build_meta"
 
 [tool.setuptools.packages.find]
 include = ["app*"]
+
+[tool.setuptools.package-data]
+"app.web" = ["templates/*.html", "static/*"]
 
 [tool.pytest.ini_options]
 asyncio_mode = "auto"

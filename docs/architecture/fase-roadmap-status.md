@@ -204,3 +204,27 @@ Chiusi nel codice i due gap di ingestion Amazon (Fase 2) e la regola
 - Baseline nuova: **374 passed, 3 skipped**, ruff pulito, mypy ai 3 errori
   noti.
 - Guida: `docs/anello1-installazione.md`.
+
+## Aggiornamento 2026-10-14 (notte) — prima versione completa: interfaccia, auditor, sito
+
+- **Interfaccia web** `/ui` (Jinja2, servita da FastAPI, nessun frontend
+  separato): login con chiave condivisa + nome, panoramica, lista prospect,
+  scheda prospect con azioni (approva/scarta/contattato, bozza, conferma
+  sito, AI on demand, audit), scansioni. JSON: `GET /prospects`.
+- **Website discovery** (`app/services/website_discovery.py`, CLI
+  `dinamik websites discover`): sito confermato solo se la P.IVA verificata
+  compare nella home; scrive `Brand.website` e `WebsiteProfile` -> la
+  regola `WEBSITE_OPPORTUNITY` riceve finalmente dati reali.
+- **Auditor MVP** (`app/services/audit_builder.py`): primo writer di
+  `AuditorPackage`; testi deterministici problema/perché/cosa fare, pagina
+  stampabile in PDF.
+- **Screenshot nel DB** (`evidence_files`, migrazione `f45d3dcf674c`) per
+  mostrarli dal server.
+- **Correzioni di integrazione**: motori AI e scoring ora leggono anche le
+  evidenze dello scout (`app/services/brand_evidence.py`); l'AIAdvisor
+  considera anche `LISTING_OPPORTUNITY`; bug del tasso di estrazione
+  venditore salvato a 0 nell'output del run.
+- `dinamik scout refresh` per lo storico settimanale; `deploy/` con unit
+  systemd ed esempi cron.
+- Nuovo stato prospect `CONTACTED`.
+- Baseline nuova: **389 passed, 3 skipped**, ruff pulito, mypy ai 3 errori noti.

@@ -1,0 +1,27 @@
+<!doctype html>
+<html lang="it">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>{% block title %}Dinamik Advisor{% endblock %}</title>
+  <link rel="stylesheet" href="/ui/static/style.css">
+</head>
+<body>
+  <header class="top">
+    <div class="wrap">
+      <a class="brand" href="/ui">Dinamik Advisor</a>
+      <nav>
+        <a href="/ui" class="{{ 'active' if active == 'dashboard' }}">Panoramica</a>
+        <a href="/ui/prospects" class="{{ 'active' if active == 'prospects' }}">Prospect</a>
+        <a href="/ui/runs" class="{{ 'active' if active == 'runs' }}">Scansioni</a>
+      </nav>
+      <span class="user">{{ user }} · <a href="/ui/logout">esci</a></span>
+    </div>
+  </header>
+  <main class="wrap">
+    {% if flash %}<div class="flash">{{ flash }}</div>{% endif %}
+    {% if flash_error %}<div class="flash error">{{ flash_error }}</div>{% endif %}
+    {% block content %}{% endblock %}
+  </main>
+</body>
+</html>

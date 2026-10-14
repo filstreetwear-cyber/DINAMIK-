@@ -82,32 +82,23 @@ from app.ai.bootstrap import build_default_ai_gateway
 from app.ai.contracts import AIClaim as AIClaimDTO
 from app.ai.gateway import AIGateway
 from app.core.config import Settings, get_settings
-from app.models import AgentEvent, AgentRun, Brand, ErrorLog, Evidence, ResearchResult
+from app.models import AgentEvent, AgentRun, Brand, ErrorLog, Evidence
 from app.models.ai_claim import AIClaim as AIClaimRow
 from app.models.enums import ErrorCategory
+from app.services.brand_evidence import brand_evidence_condition
 
 _MAX_EVIDENCE_PER_BRAND = 20
 
 
 async def _evidence_for_brand(session: AsyncSession, brand_id: uuid.UUID) -> list[Evidence]:
-    """Same ResearchResult.brand_id -> Evidence.entity_id chain as
-    scoring_engine.py's _evidence_ids_for_brand, kept as an independent
-    read here (returns full rows, not just ids) -- see module docstring."""
-    research_result_ids = (
-        (await session.execute(select(ResearchResult.id).where(ResearchResult.brand_id == brand_id)))
-        .scalars()
-        .all()
-    )
-    if not research_result_ids:
-        return []
-    entity_ids = [str(rid) for rid in research_result_ids]
+    """Evidence del brand da entrambe le catene (discovery mock via
+    research_result, scout live via product/seller/company/brand) -- vedi
+    app/services/brand_evidence.py. Più recenti prima, con tetto."""
+    condition = await brand_evidence_condition(session, brand_id)
     rows = (
         (
             await session.execute(
-                select(Evidence)
-                .where(Evidence.entity_type == "research_result", Evidence.entity_id.in_(entity_ids))
-                .order_by(Evidence.observed_at.desc())
-                .limit(_MAX_EVIDENCE_PER_BRAND)
+                select(Evidence).where(condition).order_by(Evidence.observed_at.desc()).limit(_MAX_EVIDENCE_PER_BRAND)
             )
         )
         .scalars()

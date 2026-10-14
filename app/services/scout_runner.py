@@ -25,7 +25,7 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.config import Settings, get_settings
-from app.models import AgentRun, AmazonListing, AmazonSeller, Company, ResearchJob
+from app.models import AgentRun, AmazonListing, AmazonSeller, Company, EvidenceFile, ResearchJob
 from app.models.enums import ResearchJobStatus
 from app.services.amazon_ingestion import (
     apply_seller_profile,
@@ -255,6 +255,7 @@ async def run_scout(
     )
     job.completed_at = datetime.now(UTC)
     agent_run.status = "SUCCESS" if not summary.stopped_reason else "PARTIAL"
+    summary.rows = [row_by_asin[a] for a in queue if a in row_by_asin]  # prima dell'output: serve al tasso
     agent_run.output = {
         "asins_requested": summary.asins_requested,
         "pages_fetched": summary.pages_fetched,
@@ -267,7 +268,6 @@ async def run_scout(
         "stopped_reason": summary.stopped_reason,
         "errors": summary.errors[:50],
     }
-    summary.rows = [row_by_asin[a] for a in queue if a in row_by_asin]
     summary.report_path = write_validation_report(summary, settings, job_name=name)
     await session.flush()
     await _commit()
@@ -325,12 +325,26 @@ async def _qualify_and_prune(
         else:
             row.target = False
 
+        listing_id = listing_by_asin.get(asin)
+        listing = await session.get(AmazonListing, listing_id) if listing_id else None
+        if listing is None or not listing.screenshot_path:
+            continue
+        shot = Path(listing.screenshot_path)
         if not row.target:
-            listing_id = listing_by_asin.get(asin)
-            listing = await session.get(AmazonListing, listing_id) if listing_id else None
-            if listing is not None and listing.screenshot_path:
-                Path(listing.screenshot_path).unlink(missing_ok=True)
-                listing.screenshot_path = None
+            shot.unlink(missing_ok=True)
+            listing.screenshot_path = None
+        elif shot.exists():
+            # Copia nel DB: l'interfaccia gira sul server, il file è sul PC di casa.
+            data = shot.read_bytes()
+            session.add(
+                EvidenceFile(
+                    listing_id=listing.id,
+                    kind="screenshot",
+                    content_type="image/jpeg",
+                    data=data,
+                    size_bytes=len(data),
+                )
+            )
     await session.flush()
 
 
@@ -387,3 +401,30 @@ def write_validation_report(summary: ScoutRunSummary, settings: Settings, *, job
         lines += ["", "## Errori", ""] + [f"- {e}" for e in summary.errors]
     path.write_text("\n".join(lines) + "\n", encoding="utf-8")
     return path
+
+
+async def target_asins_for_refresh(
+    session: AsyncSession, *, limit: int = 50, min_age_days: int = 6, settings: Settings | None = None
+) -> list[str]:
+    """ASIN dei venditori target da riosservare (storico BSR/prezzo/recensioni),
+    i meno recenti prima, saltando quelli osservati negli ultimi min_age_days."""
+    from sqlalchemy import func
+
+    from app.models import AmazonProduct
+
+    settings = settings or get_settings()
+    cutoff = datetime.now(UTC) - timedelta(days=min_age_days)
+    last_seen = func.max(AmazonListing.observed_at)
+    rows = (
+        await session.execute(
+            select(AmazonProduct.asin, last_seen)
+            .join(AmazonSeller, AmazonProduct.seller_id == AmazonSeller.id)
+            .join(AmazonListing, AmazonListing.product_id == AmazonProduct.id)
+            .where(AmazonSeller.is_target.is_(True), AmazonProduct.marketplace == settings.amazon_marketplace)
+            .group_by(AmazonProduct.asin)
+            .having(last_seen < cutoff)
+            .order_by(last_seen)
+            .limit(limit)
+        )
+    ).all()
+    return [asin for asin, _ in rows]

@@ -1,0 +1,21 @@
+<div class="table-wrap">
+<table>
+  <thead><tr><th>Data</th><th>Nome</th><th>Categoria</th><th>Schede</th><th>Venditore estratto</th><th>Target</th><th>Esito</th></tr></thead>
+  <tbody>
+  {% for r in runs %}
+    <tr>
+      <td class="small">{{ r.job.created_at.strftime('%d/%m/%Y %H:%M') }}</td>
+      <td>{{ r.job.name }}</td>
+      <td>{{ r.job.category or '—' }}</td>
+      <td>{{ r.output.get('products_ingested', '—') }}/{{ r.output.get('asins_requested', '—') }}</td>
+      <td>{% set rate = r.output.get('seller_extraction_rate') %}
+        {% if rate is not none %}<span class="badge {{ 'ok' if rate >= 0.8 else 'HIGH' }}">{{ (rate * 100) | round | int }}%</span>{% else %}—{% endif %}</td>
+      <td>{{ r.output.get('targets', '—') }}</td>
+      <td>{% if r.output.get('stopped_reason') %}<span class="badge HIGH">fermata: {{ r.output.get('stopped_reason') }}</span>{% else %}<span class="badge ok">completa</span>{% endif %}</td>
+    </tr>
+  {% else %}
+    <tr><td colspan="7" class="muted">Ancora nessuna scansione.</td></tr>
+  {% endfor %}
+  </tbody>
+</table>
+</div>

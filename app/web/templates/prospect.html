@@ -1,0 +1,190 @@
+{% extends "base.html" %}
+{% from "_macros.html" import level, status %}
+{% block title %}{{ d.brand.name }} — Dinamik Advisor{% endblock %}
+{% block content %}
+<p class="small"><a href="/ui/prospects">&larr; Prospect</a></p>
+<div class="actions" style="justify-content: space-between; align-items: center; margin-bottom: 16px;">
+  <div>
+    <h1 style="margin: 0;">{{ d.brand.name }}</h1>
+    <div class="muted">{{ d.company.legal_name if d.company else 'Azienda non ancora verificata' }}
+      {% if d.company and d.company.city %} · {{ d.company.city }}{% endif %}</div>
+  </div>
+  <div class="actions">
+    {{ status(d.status) }}
+    {% if d.overall_score is not none %}<span class="badge NONE">Punteggio {{ d.overall_score }}</span>{% endif %}
+  </div>
+</div>
+
+<div class="grid two">
+  <div>
+    <div class="card">
+      <h2>Schede prodotto</h2>
+      {% for v in d.products %}
+      <div class="product">
+        <div>
+          {% if v.screenshot_id %}
+            <a href="/ui/files/{{ v.screenshot_id }}" target="_blank"><img class="shot" src="/ui/files/{{ v.screenshot_id }}" alt="Screenshot scheda {{ v.product.asin }}" loading="lazy"></a>
+          {% else %}<div class="muted small">Nessuno screenshot</div>{% endif %}
+        </div>
+        <div>
+          <h3><a href="{{ v.product.product_url or ('https://www.amazon.it/dp/' ~ v.product.asin) }}" target="_blank" rel="noopener">{{ v.product.title }}</a></h3>
+          <div class="muted small">ASIN {{ v.product.asin }}
+            {% if v.listing %} · osservata il {{ v.listing.observed_at.strftime('%d/%m/%Y') }}{% endif %}</div>
+          {% if v.listing %}
+          <div class="small" style="margin-top: 6px;">
+            Voto <strong>{{ v.listing.rating or '—' }}</strong> ·
+            Recensioni <strong>{{ v.listing.review_count or '—' }}</strong> ·
+            BSR <strong>{{ v.listing.bsr or '—' }}</strong> {% if v.listing.bsr_category %}<span class="muted">in {{ v.listing.bsr_category }}</span>{% endif %} ·
+            Immagini <strong>{{ v.listing.image_count }}</strong> ·
+            Video <strong>{{ 'sì' if v.listing.video_count else 'no' }}</strong> ·
+            A+ <strong>{{ 'sì' if v.listing.has_a_plus_content else 'no' }}</strong>
+          </div>
+          {% endif %}
+          {% if v.issues %}
+            <ul class="issues small">{% for i in v.issues %}<li>{{ i | issue_text }}</li>{% endfor %}</ul>
+          {% else %}<div class="muted small">Nessun problema rilevato dalle regole.</div>{% endif %}
+          {% if v.history | length > 1 %}
+            {% set bsrs = v.history | selectattr('bsr') | map(attribute='bsr') | list | reverse %}
+            {% if bsrs %}
+            {% set top = bsrs | max %}
+            <details class="small"><summary>Storico BSR ({{ bsrs | length }} osservazioni, più basso = vende di più)</summary>
+              <div class="spark" title="{{ bsrs | join(' → ') }}">
+                {% for b in bsrs %}<span style="height: {{ (100 - (b / top * 85)) | round | int }}%"></span>{% endfor %}
+              </div>
+              <div class="muted">{{ bsrs | join(' → ') }}</div>
+            </details>
+            {% endif %}
+          {% endif %}
+        </div>
+      </div>
+      {% else %}<p class="muted">Nessun prodotto collegato.</p>{% endfor %}
+    </div>
+
+    <div class="card">
+      <h2>Opportunità</h2>
+      <div class="table-wrap"><table>
+        <thead><tr><th>Tipo</th><th>Livello</th><th>Motivi</th><th>Punteggio</th></tr></thead>
+        <tbody>
+        {% for kind, o in d.opportunities.items() %}
+          <tr>
+            <td class="small">{{ {'LISTING_OPPORTUNITY': 'Qualità schede', 'AMAZON_OPPORTUNITY': 'Voti e recensioni', 'BUSINESS_VALUE': 'Valore commerciale', 'WEBSITE_OPPORTUNITY': 'Sito web'}.get(kind, kind) }}</td>
+            <td>{{ level(o.level) }}</td>
+            <td class="small">{{ (o.reasons or []) | join('; ') }}</td>
+            <td>{{ d.scores[kind].score if kind in d.scores else '—' }}</td>
+          </tr>
+        {% else %}<tr><td colspan="4" class="muted">Nessuna valutazione ancora.</td></tr>{% endfor %}
+        </tbody>
+      </table></div>
+    </div>
+
+    <div class="card">
+      <h2>Bozza di contatto</h2>
+      <p class="muted small">Il sistema non invia nulla: la bozza si copia e si manda dalla propria email.</p>
+      {% set draft = d.drafts[0] if d.drafts else none %}
+      <form method="post" action="/ui/prospects/{{ d.brand.id }}/draft" class="grid">
+        <input class="wide" type="text" name="subject" placeholder="Oggetto" value="{{ draft.subject if draft else '' }}" required>
+        <textarea name="body" required placeholder="Scrivi o genera una bozza">{{ draft.body if draft else '' }}</textarea>
+        <div class="actions">
+          <button type="submit" class="primary">Salva bozza</button>
+          {% if draft %}<span class="muted small">Ultima versione: {{ 'modificata da ' ~ draft.model[5:] if draft.provider == 'human' else 'generata da AI (' ~ draft.model ~ ')' }} il {{ draft.created_at.strftime('%d/%m/%Y %H:%M') }}</span>{% endif %}
+        </div>
+      </form>
+      <form method="post" action="/ui/prospects/{{ d.brand.id }}/ai" style="margin-top: 8px;">
+        <button type="submit">Genera raccomandazioni e bozza con AI</button>
+        <span class="muted small">Usa il modello locale (Ollama). Consigliato solo per prospect approvati.</span>
+      </form>
+      {% if d.recommendations %}
+      <details style="margin-top: 12px;"><summary>Raccomandazioni AI ({{ d.recommendations | length }})</summary>
+        <ul class="small">{% for r in d.recommendations %}<li><strong>{{ r.priority }}</strong> · {{ r.recommendation }}</li>{% endfor %}</ul>
+      </details>
+      {% endif %}
+    </div>
+
+    <div class="card">
+      <h2>Evidenze</h2>
+      <details><summary>{{ d.evidence | length }} evidenze raccolte (ogni dato con la sua fonte)</summary>
+        <div class="table-wrap"><table class="evidence">
+          <thead><tr><th>Data</th><th>Dato</th><th>Fonte</th><th>Affidabilità</th></tr></thead>
+          <tbody>{% for e in d.evidence %}
+            <tr><td>{{ e.observed_at.strftime('%d/%m/%Y') }}</td><td>{{ e.claim }}</td>
+              <td>{% if e.source_url %}<a href="{{ e.source_url }}" target="_blank" rel="noopener">{{ e.provider }}</a>{% else %}{{ e.provider }}{% endif %}</td>
+              <td>{{ e.data_type }} · {{ e.confidence | int }}%</td></tr>
+          {% endfor %}</tbody>
+        </table></div>
+      </details>
+    </div>
+  </div>
+
+  <div>
+    <div class="card">
+      <h2>Decisione</h2>
+      <form method="post" action="/ui/prospects/{{ d.brand.id }}/status" class="grid">
+        <input class="wide" type="text" name="reason" placeholder="Nota (facoltativa)">
+        <div class="actions">
+          <button class="primary" name="status" value="APPROVED">Approva</button>
+          <button class="danger" name="status" value="REJECTED">Scarta</button>
+          <button name="status" value="CONTACTED">Segna contattato</button>
+          <button name="status" value="NEEDS_REVIEW">Da rivedere</button>
+        </div>
+      </form>
+      {% if d.status_history %}
+      <ul class="small" style="padding-left: 18px; margin-bottom: 0;">
+        {% for s in d.status_history[:6] %}
+          <li>{{ status(s.status) }} {{ s.changed_by }} · {{ s.created_at.strftime('%d/%m %H:%M') }}{% if s.reason %} — <span class="muted">{{ s.reason }}</span>{% endif %}</li>
+        {% endfor %}
+      </ul>
+      {% endif %}
+    </div>
+
+    <div class="card">
+      <h2>Azienda</h2>
+      {% if d.company %}
+      <dl class="kv">
+        <dt>Ragione sociale</dt><dd>{{ d.company.legal_name }}</dd>
+        <dt>P.IVA</dt><dd>{{ d.company.vat_country }}{{ d.company.vat_number }} {% if d.company.vies_valid %}<span class="badge ok">VIES valida</span>{% elif d.company.vies_valid is sameas false %}<span class="badge HIGH">VIES non valida</span>{% endif %}</dd>
+        <dt>Indirizzo</dt><dd>{{ (d.company.address or '—') | replace('\n', ', ') }}</dd>
+      </dl>
+      {% else %}<p class="muted small">Nessuna P.IVA trovata o non ancora verificata su VIES.</p>{% endif %}
+      <h3 style="margin-top: 14px;">Venditori Amazon</h3>
+      <ul class="small" style="padding-left: 18px;">
+        {% for s in d.sellers %}
+          <li>{% if s.seller_url %}<a href="{{ s.seller_url }}" target="_blank" rel="noopener">{{ s.seller_name }}</a>{% else %}{{ s.seller_name }}{% endif %}
+            <span class="muted">· {{ s.business_country or '?' }} · {{ {True: 'target', False: 'non target', None: 'da qualificare'}[s.is_target] }}</span></li>
+        {% endfor %}
+      </ul>
+    </div>
+
+    <div class="card">
+      <h2>Sito web</h2>
+      {% if d.brand.website %}
+        <p><a href="{{ d.brand.website }}" target="_blank" rel="noopener">{{ d.brand.website }}</a></p>
+        {% if d.website_profile %}
+        <dl class="kv small">
+          <dt>Piattaforma</dt><dd>{{ d.website_profile.technology }}</dd>
+          <dt>Mobile</dt><dd>{{ {True: 'sì', False: 'no', None: '—'}[d.website_profile.mobile_friendly] }}</dd>
+          <dt>Velocità</dt><dd>{{ d.website_profile.page_speed_score if d.website_profile.page_speed_score is not none else '—' }}</dd>
+          <dt>SEO</dt><dd>{{ d.website_profile.seo_score if d.website_profile.seo_score is not none else '—' }}</dd>
+          <dt>Chatbot</dt><dd>{{ {True: 'sì', False: 'no', None: '—'}[d.website_profile.has_chatbot] }}</dd>
+        </dl>
+        {% endif %}
+      {% else %}
+        {% if d.possible_websites %}<p class="small">Possibile sito (nome nel titolo, P.IVA non trovata): {% for w in d.possible_websites %}<a href="{{ w }}" target="_blank" rel="noopener">{{ w }}</a> {% endfor %}</p>{% endif %}
+        <p class="muted small">Nessun sito confermato.</p>
+      {% endif %}
+      <form method="post" action="/ui/prospects/{{ d.brand.id }}/website" class="actions">
+        <input type="text" name="url" placeholder="www.esempio.it" value="{{ d.possible_websites[0] if d.possible_websites and not d.brand.website else '' }}">
+        <button type="submit">{{ 'Aggiorna' if d.brand.website else 'Conferma sito' }}</button>
+      </form>
+    </div>
+
+    <div class="card">
+      <h2>Audit per il cliente</h2>
+      <form method="post" action="/ui/prospects/{{ d.brand.id }}/audit" class="actions">
+        <button type="submit" class="primary">{{ 'Rigenera audit' if audit else 'Genera audit' }}</button>
+        {% if audit %}<a class="btn" href="/ui/prospects/{{ d.brand.id }}/audit">Apri ({{ audit.created_at.strftime('%d/%m %H:%M') }})</a>{% endif %}
+      </form>
+      <p class="muted small">Pagina stampabile in PDF da mostrare al potenziale cliente.</p>
+    </div>
+  </div>
+</div>
+{% endblock %}

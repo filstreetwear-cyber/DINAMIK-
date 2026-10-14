@@ -1,0 +1,17 @@
+{% extends "base.html" %}
+{% from "_macros.html" import prospect_table %}
+{% block title %}Prospect — Dinamik Advisor{% endblock %}
+{% block content %}
+<h1>Prospect</h1>
+<form class="filters" method="get" action="/ui/prospects">
+  <input type="text" name="q" value="{{ q }}" placeholder="Cerca brand o ragione sociale">
+  <select name="status">
+    <option value="">Tutti gli stati</option>
+    {% for s in statuses %}<option value="{{ s }}" {{ 'selected' if s == status }}>{{ STATUS_LABELS.get(s, s) }}</option>{% endfor %}
+  </select>
+  <label class="small"><input type="checkbox" name="all" value="1" {{ 'checked' if all }}> includi non target</label>
+  <button type="submit">Filtra</button>
+  <span class="muted small">{{ rows | length }} risultati</span>
+</form>
+<div class="card">{{ prospect_table(rows) }}</div>
+{% endblock %}

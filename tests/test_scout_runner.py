@@ -16,12 +16,14 @@ from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
 
 from app.core.config import get_settings
 from app.models import (
+    AgentRun,
     AmazonListing,
     AmazonProduct,
     AmazonSeller,
     Brand,
     Company,
     Evidence,
+    EvidenceFile,
     Opportunity,
     ResearchJob,
 )
@@ -204,6 +206,10 @@ async def test_scout_run_end_to_end(session, tmp_path):
     assert shots["B0ITSELL01"] is not None and Path(shots["B0ITSELL01"]).exists()
     assert shots["B0CNSELL01"] is None and shots["B0AMAZON01"] is None
     assert not list((tmp_path / "ev").glob("product_B0CNSELL01_*.jpg"))
+    stored = (await session.execute(select(EvidenceFile).where(EvidenceFile.listing_id.in_(
+        [listing.id for _, listing in listings]
+    )))).scalars().all()
+    assert len(stored) == 2 and stored[0].data == b"jpg"  # le 2 schede del seller IT and stored[0].content_type == "image/jpeg"
 
     # Ogni campo con la sua evidenza.
     product = (await session.execute(select(AmazonProduct).where(AmazonProduct.asin == "B0ITSELL01"))).scalar_one()
@@ -213,6 +219,8 @@ async def test_scout_run_end_to_end(session, tmp_path):
 
     job = await session.get(ResearchJob, summary.job_id)
     assert job is not None and job.status == ResearchJobStatus.COMPLETED.value
+    run = await session.get(AgentRun, summary.agent_run_id)
+    assert run is not None and run.output["seller_extraction_rate"] == 1.0  # regressione: era salvato 0
 
     assert summary.report_path is not None and summary.report_path.exists()
     report = summary.report_path.read_text()
@@ -275,3 +283,20 @@ async def test_seller_without_brand_is_still_created_and_profiled(session, tmp_p
     assert product.brand_id is None and product.seller_id is not None
     seller = await session.get(AmazonSeller, product.seller_id)
     assert seller is not None and seller.is_target is True and seller.company_id is not None
+
+
+async def test_target_asins_for_refresh(session, tmp_path):
+    from datetime import timedelta
+
+    from app.services.scout_runner import target_asins_for_refresh
+
+    vies = _vies({"01234567890": {"name": "CASABELLA SRL", "address": "VIA ROMA 1\n20121 MILANO MI"}})
+    await run_scout(session, fetcher=FakeFetcher(_pages(), tmp_path / "ev"), vies=vies,
+                    asins=["B0ITSELL01", "B0CNSELL01"], name="refresh-seed")
+    assert "B0ITSELL01" not in await target_asins_for_refresh(session, limit=1000)  # appena osservata
+    product = (await session.execute(select(AmazonProduct).where(AmazonProduct.asin == "B0ITSELL01"))).scalar_one()
+    for listing in (await session.execute(select(AmazonListing).where(AmazonListing.product_id == product.id))).scalars():
+        listing.observed_at = listing.observed_at - timedelta(days=10)
+    await session.flush()
+    due = await target_asins_for_refresh(session, limit=1000)
+    assert "B0ITSELL01" in due and "B0CNSELL01" not in due  # il seller CN non è target

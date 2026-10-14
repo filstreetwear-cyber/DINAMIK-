@@ -1,0 +1,50 @@
+{% extends "base.html" %}
+{% block title %}Audit {{ p.brand.name }}{% endblock %}
+{% block content %}
+<div class="no-print actions" style="margin-bottom: 16px;">
+  <a class="btn" href="/ui/prospects/{{ p.brand.id }}">&larr; Torna al prospect</a>
+  <button class="primary" onclick="window.print()">Stampa / salva PDF</button>
+</div>
+<article class="audit">
+  <p class="muted small">Analisi della presenza su Amazon.it · {{ p.generated_at[:10] }}</p>
+  <h1>{{ p.brand.name }}</h1>
+  {% if p.company %}<p class="muted">{{ p.company.legal_name }}{% if p.company.city %} · {{ p.company.city }}{% endif %}</p>{% endif %}
+
+  <h2>In sintesi</h2>
+  <p>Abbiamo analizzato <strong>{{ p.summary.products_analyzed }}</strong> schede prodotto: <strong>{{ p.summary.products_with_issues }}</strong> presentano margini di miglioramento concreti, per un totale di <strong>{{ p.summary.total_issues }}</strong> interventi possibili.</p>
+
+  {% for prod in p.products %}
+  <section class="product-block">
+    <h3>{{ prod.title }}</h3>
+    <p class="muted small">ASIN {{ prod.asin }} · voto {{ prod.rating or '—' }} · {{ prod.review_count or 0 }} recensioni · {{ prod.image_count or 0 }} immagini · video {{ 'sì' if prod.has_video else 'no' }} · A+ {{ 'sì' if prod.has_a_plus else 'no' }}</p>
+    {% if prod.screenshot_id %}<img class="shot" src="/ui/files/{{ prod.screenshot_id }}" alt="Scheda {{ prod.asin }} come la vede il cliente" style="max-height: 340px;">{% endif %}
+    {% for i in prod.issues %}
+      <div class="issue">
+        <p><strong>{{ i.problem }}</strong></p>
+        {% if i.why %}<p class="small">{{ i.why }}</p>{% endif %}
+        {% if i.action %}<p class="small"><em>Cosa fare:</em> {{ i.action }}</p>{% endif %}
+      </div>
+    {% else %}<p class="small muted">Scheda in buono stato secondo i criteri analizzati.</p>{% endfor %}
+  </section>
+  {% endfor %}
+
+  {% if p.website %}
+  <section class="product-block">
+    <h2>Sito web</h2>
+    <p><a href="{{ p.website.url }}">{{ p.website.url }}</a>{% if p.website.technology and p.website.technology != 'UNKNOWN' %} · {{ p.website.technology | title }}{% endif %}</p>
+    {% for i in p.website.issues %}
+      <div class="issue"><p><strong>{{ i.problem }}</strong></p><p class="small">{{ i.why }}</p><p class="small"><em>Cosa fare:</em> {{ i.action }}</p></div>
+    {% else %}<p class="small muted">Nessun problema rilevato sui controlli eseguiti.</p>{% endfor %}
+  </section>
+  {% endif %}
+
+  {% if p.ai_recommendations %}
+  <section class="product-block">
+    <h2>Priorità consigliate</h2>
+    <ol>{% for r in p.ai_recommendations %}<li>{{ r.text }}</li>{% endfor %}</ol>
+  </section>
+  {% endif %}
+
+  <p class="muted small" style="margin-top: 32px;">{{ p.disclaimer }}</p>
+</article>
+{% endblock %}

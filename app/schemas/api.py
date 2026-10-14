@@ -193,3 +193,24 @@ class WeeklyScanItem(BaseModel):
     errors: list
     metrics: dict
     report_path: str | None
+
+
+# --- 2026-10-14 (Anello 1): prospect read surface -----------------------
+# Stessi dati delle pagine /ui/prospects, in JSON, per integrazioni future
+# (fogli, CRM). Sola lettura: le azioni passano dall'interfaccia.
+
+
+class ProspectListItem(BaseModel):
+    brand_id: uuid.UUID
+    brand_name: str
+    company_name: str | None
+    vat: str | None
+    city: str | None
+    website: str | None
+    seller_names: list[str]
+    is_target: bool | None
+    status: str
+    score: float | None
+    listing_level: str | None
+    amazon_level: str | None
+    product_count: int

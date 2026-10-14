@@ -15,7 +15,7 @@ from app.models.browser import BrowserSession, BrowserTask
 from app.models.company import Brand, Company
 from app.models.contact import Contact, ProspectStatus
 from app.models.contact_draft import ContactDraft
-from app.models.evidence import Evidence
+from app.models.evidence import Evidence, EvidenceFile
 from app.models.market import Competitor, Keyword
 from app.models.marketplace import Category, Marketplace
 from app.models.opportunity import Opportunity, Score
@@ -44,6 +44,7 @@ __all__ = [
     "EntitySnapshot",
     "ErrorLog",
     "Evidence",
+    "EvidenceFile",
     "Keyword",
     "Marketplace",
     "Opportunity",

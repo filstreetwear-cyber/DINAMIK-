@@ -1,0 +1,22 @@
+# systemd unit per l'interfaccia web + API sul server OVH.
+# Installazione:
+#   sudo cp deploy/dinamik-web.service /etc/systemd/system/
+#   sudo systemctl daemon-reload && sudo systemctl enable --now dinamik-web
+# Adatta User e WorkingDirectory al tuo utente e al percorso del clone.
+[Unit]
+Description=Dinamik Advisor - interfaccia web e API
+After=network-online.target postgresql.service
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=ubuntu
+WorkingDirectory=/home/ubuntu/DINAMIK-
+EnvironmentFile=/home/ubuntu/DINAMIK-/.env
+# Ascolta solo su localhost e sull'IP Tailscale: niente porte pubbliche.
+ExecStart=/home/ubuntu/DINAMIK-/.venv/bin/uvicorn app.main:app --host 127.0.0.1 --port 8000 --workers 1
+Restart=on-failure
+RestartSec=5
+
+[Install]
+WantedBy=multi-user.target

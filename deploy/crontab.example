@@ -1,0 +1,12 @@
+# Esempi di pianificazione. `crontab -e` e incolla le righe che servono.
+# Percorsi da adattare al tuo clone.
+
+# --- PC di casa (Linux/macOS) ---------------------------------------------
+# Ogni lunedì alle 9:13: riosserva fino a 50 schede dei venditori target
+# (storico BSR/prezzo/recensioni). Su Windows: Utilità di pianificazione
+# con lo stesso comando.
+13 9 * * 1  cd ~/DINAMIK- && .venv/bin/dinamik scout refresh --max-products 50 >> logs/refresh.log 2>&1
+
+# --- Server OVH ------------------------------------------------------------
+# Ogni giorno alle 6:07: cerca il sito ufficiale dei nuovi brand con P.IVA.
+7 6 * * *  cd ~/DINAMIK- && .venv/bin/dinamik websites discover --max-brands 50 >> logs/websites.log 2>&1

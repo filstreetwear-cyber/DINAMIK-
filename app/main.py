@@ -49,9 +49,12 @@ yet back up with a way to check completion.
 from __future__ import annotations
 
 import uuid
+from pathlib import Path
 
-from fastapi import Depends, FastAPI, Header, HTTPException, Query
+from fastapi import Depends, FastAPI, Header, HTTPException, Query, Request
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import RedirectResponse
+from fastapi.staticfiles import StaticFiles
 from sqlalchemy import select, text
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -72,10 +75,15 @@ from app.schemas.api import (
     JobRunResponse,
     OpportunityEngineStageResult,
     OpportunityListItemWithBrand,
+    ProspectListItem,
     ScoringEngineStageResult,
     WeeklyScanItem,
 )
 from app.services.pipeline_orchestrator import run_research_pipeline
+from app.services.prospect_service import list_prospects
+from app.web import routes as ui_router_module
+from app.web.routes import _LoginRequired as UILoginRequired
+from app.web.routes import router as ui_router
 
 settings = get_settings()
 
@@ -380,3 +388,35 @@ async def get_weekly_scan(
     if scan is None:
         raise HTTPException(status_code=404, detail="weekly scan not found")
     return scan
+
+
+# --- 2026-10-14 (Anello 1): prospect JSON + interfaccia web --------------
+
+
+@app.get("/prospects", response_model=list[ProspectListItem])
+async def list_prospects_api(
+    status: str | None = None,
+    q: str | None = None,
+    include_non_target: bool = False,
+    limit: int = Query(default=200, le=1000),
+    session: AsyncSession = Depends(get_session),
+    _key: None = Depends(require_dashboard_key),
+) -> list[ProspectListItem]:
+    rows = await list_prospects(
+        session, status=status, search=q, target_only=not include_non_target, limit=limit
+    )
+    return [ProspectListItem.model_validate(r, from_attributes=True) for r in rows]
+
+
+app.include_router(ui_router)
+app.mount("/ui/static", StaticFiles(directory=str(Path(ui_router_module.__file__).parent / "static")), name="ui-static")
+
+
+@app.exception_handler(UILoginRequired)
+async def _ui_login_redirect(request: Request, exc: UILoginRequired) -> RedirectResponse:
+    return RedirectResponse("/ui/login", status_code=303)
+
+
+@app.get("/", include_in_schema=False)
+async def root() -> RedirectResponse:
+    return RedirectResponse("/ui", status_code=307)

@@ -127,13 +127,73 @@ dinamik export brands
 Il file .xlsx in `exports/` ha in coda le colonne nuove: opportunità
 scheda (livello e motivi), venditore, target sì/no, P.IVA, VIES, indirizzo.
 
+## 7. Interfaccia web (server OVH)
+
+In `.env` sul server aggiungi una chiave lunga, condivisa col team:
+```
+DASHBOARD_API_KEY=una-frase-lunga-difficile-da-indovinare
+```
+Avvio come servizio (riparte da solo dopo un riavvio):
+```bash
+sudo cp deploy/dinamik-web.service /etc/systemd/system/
+# modifica User e i percorsi nel file se il tuo utente non è "ubuntu"
+sudo systemctl daemon-reload && sudo systemctl enable --now dinamik-web
+```
+Il servizio ascolta solo su `127.0.0.1:8000`. Per aprirlo dai PC del team
+(che hanno Tailscale) senza esporlo su internet:
+```bash
+sudo tailscale serve --bg 8000
+```
+Poi apri `https://<nome-server>.<tailnet>.ts.net/ui` dal browser. Login: il
+tuo nome + la chiave. Il nome resta registrato accanto a ogni approvazione.
+
+Cosa si fa dall'interfaccia:
+- **Panoramica**: numeri chiave, migliori prospect, ultime scansioni.
+- **Prospect**: lista filtrabile (stato, ricerca, includi non target).
+- **Scheda prospect**: screenshot e problemi di ogni scheda, storico BSR,
+  opportunità, azienda e P.IVA, sito web, evidenze; pulsanti Approva /
+  Scarta / Contattato; bozza di contatto modificabile; generazione AI;
+  audit stampabile per il cliente.
+- **Scansioni**: esito di ogni run dello scout.
+
+## 8. Sito ufficiale dei brand (server OVH)
+
+```bash
+dinamik websites discover --max-brands 50
+```
+Prova i domini plausibili (brand.it, brand.com, ...) e conferma il sito
+solo se nella home compare la P.IVA verificata su VIES. Se trova solo il
+nome nel titolo lo segna come "possibile": lo confermi a mano dalla scheda
+prospect. Con `--lighthouse` aggiunge velocità e SEO (serve
+`npm install -g lighthouse`).
+
+## 9. AI locale (server OVH, facoltativo)
+
+Serve solo per "Genera raccomandazioni e bozza con AI". Tutto il resto
+funziona senza.
+```bash
+curl -fsSL https://ollama.com/install.sh | sh
+ollama pull qwen3:1.7b
+```
+Verifica: `dinamik health` deve mostrare `ai: AVAILABLE`. Con 4 GB di RAM
+il modello 1.7B è il massimo ragionevole; una bozza richiede 20-60 secondi.
+
+## 10. Pianificazioni
+
+Esempi pronti in `deploy/crontab.example`:
+- PC di casa, ogni lunedì: `dinamik scout refresh` (storico delle schede
+  target, il "mini-Keepa").
+- Server, ogni giorno: `dinamik websites discover`.
+
 ## Dove finiscono i dati
 
 | Cosa | Dove |
 |---|---|
-| HTML di ogni pagina, screenshot schede dei target | `data/evidence/AAAA-MM-GG/` sul PC di casa |
+| HTML di ogni pagina | `data/evidence/AAAA-MM-GG/` sul PC di casa |
+| Screenshot schede dei target | sul PC di casa **e** copia nel database (li mostra l'interfaccia) |
 | Brand, venditori, aziende, prodotti, storico | Postgres sul server OVH |
 | Report di validazione | `reports/anello1/` sul PC di casa |
 
-Le evidenze restano sul PC di casa. Se servono sul server: `rsync` via
-Tailscale o una cartella sincronizzata. Non è automatico in questa versione.
+Gli HTML grezzi restano sul PC di casa (servono per correggere il parser).
+Gli screenshot dei target sono copiati nel database, quindi l'interfaccia
+sul server li mostra senza sincronizzare cartelle.

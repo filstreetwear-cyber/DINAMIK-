@@ -35,3 +35,37 @@ def _isolate_generated_dirs(tmp_path, monkeypatch: pytest.MonkeyPatch):
     get_settings.cache_clear()
     yield
     get_settings.cache_clear()
+
+
+async def _db_reachable() -> bool:
+    from sqlalchemy.exc import OperationalError
+    from sqlalchemy.ext.asyncio import create_async_engine
+
+    from app.core.config import get_settings
+
+    try:
+        engine = create_async_engine(get_settings().database_url)
+        async with engine.connect() as conn:
+            await conn.run_sync(lambda c: None)
+        await engine.dispose()
+        return True
+    except (OperationalError, OSError):
+        return False
+
+
+@pytest.fixture
+async def session():
+    """Postgres reale o skip, con rollback a fine test. I file di test più
+    vecchi definiscono un proprio `session` locale, che ha la precedenza."""
+    from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
+
+    from app.core.config import get_settings
+
+    if not await _db_reachable():
+        pytest.skip("PostgreSQL not reachable")
+    engine = create_async_engine(get_settings().database_url)
+    factory = async_sessionmaker(bind=engine, expire_on_commit=False)
+    async with factory() as s:
+        yield s
+        await s.rollback()
+    await engine.dispose()

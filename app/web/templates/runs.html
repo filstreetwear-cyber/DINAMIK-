@@ -1,0 +1,7 @@
+{% extends "base.html" %}
+{% block title %}Scansioni — Dinamik Advisor{% endblock %}
+{% block content %}
+<h1>Scansioni Amazon</h1>
+<p class="muted">Le scansioni partono dal PC di casa con <code>dinamik scout run</code>. Soglia di validazione: venditore estratto almeno all'80%.</p>
+<div class="card">{% include "_runs_table.html" %}</div>
+{% endblock %}

@@ -73,6 +73,7 @@ pipeline_app = typer.Typer(help="Run the Milestone 11 research pipeline.")
 scan_app = typer.Typer(help="Run and inspect the weekly intelligence scan.")
 export_app = typer.Typer(help="Export data to spreadsheets for the internal team.")
 scout_app = typer.Typer(help="Anello 1: scout live su Amazon.it (da lanciare dal PC di casa).")
+websites_app = typer.Typer(help="Ricerca del sito ufficiale dei brand (P.IVA in home page).")
 
 app.add_typer(jobs_app, name="jobs")
 app.add_typer(brands_app, name="brands")
@@ -80,6 +81,7 @@ app.add_typer(pipeline_app, name="pipeline")
 app.add_typer(scan_app, name="scan")
 app.add_typer(export_app, name="export")
 app.add_typer(scout_app, name="scout")
+app.add_typer(websites_app, name="websites")
 
 
 @app.command()
@@ -510,6 +512,42 @@ async def _scout_run_async(
     typer.echo(f"report: {summary.report_path}")
 
 
+@scout_app.command("refresh")
+def scout_refresh(
+    max_products: int = typer.Option(50, help="Quante schede target riosservare in questo giro."),
+    min_age_days: int = typer.Option(6, help="Salta le schede osservate negli ultimi N giorni."),
+) -> None:
+    """Riosserva le schede dei venditori target (le meno recenti prima):
+    ogni giro aggiunge un punto allo storico di BSR, prezzo e recensioni.
+    Pensato per un'esecuzione settimanale dal PC di casa (cron/Utilità di
+    pianificazione)."""
+    asyncio.run(_scout_refresh_async(max_products=max_products, min_age_days=min_age_days))
+
+
+async def _scout_refresh_async(*, max_products: int, min_age_days: int) -> None:
+    from datetime import date
+
+    from app.services.scout_runner import target_asins_for_refresh
+
+    settings = get_settings()
+    engine, factory = _session_factory(settings)
+    try:
+        async with factory() as session:
+            asins = await target_asins_for_refresh(
+                session, limit=max_products, min_age_days=min_age_days, settings=settings
+            )
+    finally:
+        await engine.dispose()
+    if not asins:
+        typer.echo("nessuna scheda target da riosservare")
+        return
+    typer.echo(f"riosservo {len(asins)} schede target")
+    await _scout_run_async(
+        name=f"refresh-{date.today().isoformat()}", asins=asins, urls=[], category=None,
+        max_products=len(asins), evaluate=True,
+    )
+
+
 @scout_app.command("vies")
 def scout_vies(
     vat: str = typer.Argument(..., help="P.IVA con prefisso paese, es. IT01234567890."),
@@ -528,6 +566,40 @@ def scout_vies(
     typer.echo(f"city: {result.city}")
     if result.error:
         typer.echo(f"error: {result.error}")
+
+
+@websites_app.command("discover")
+def websites_discover(
+    max_brands: int = typer.Option(50, help="Massimo brand da controllare in questo giro."),
+    lighthouse: bool = typer.Option(False, help="Anche audit Lighthouse (10-30 s per sito, richiede il CLI)."),
+) -> None:
+    """Per i brand con P.IVA verificata ma senza sito: prova i domini
+    plausibili e conferma il sito se la P.IVA compare nella home. Gira dal
+    server, non tocca Amazon."""
+    asyncio.run(_websites_discover_async(max_brands=max_brands, lighthouse=lighthouse))
+
+
+async def _websites_discover_async(*, max_brands: int, lighthouse: bool) -> None:
+    from app.services.website_discovery import run_website_discovery
+    from app.tools.website.provider import WebsiteIntelligenceProvider
+
+    settings = get_settings()
+    engine, factory = _session_factory(settings)
+    try:
+        async with factory() as session:
+            summary = await run_website_discovery(
+                session,
+                max_brands=max_brands,
+                provider=WebsiteIntelligenceProvider(),
+                include_performance_audit=lighthouse,
+            )
+            await session.commit()
+    finally:
+        await engine.dispose()
+    typer.echo(f"brands_considered: {summary.brands_considered}")
+    typer.echo(f"confirmed: {summary.confirmed}  possible: {summary.possible}  not_found: {summary.not_found}")
+    for d in summary.details:
+        typer.echo(f"  {d['brand']}: {d['result']} {d.get('url', '')}")
 
 
 if __name__ == "__main__":

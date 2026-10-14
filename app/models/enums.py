@@ -59,6 +59,7 @@ class ProspectQualification(str, enum.Enum):
     NEEDS_REVIEW = "NEEDS_REVIEW"
     APPROVED = "APPROVED"
     REJECTED = "REJECTED"
+    CONTACTED = "CONTACTED"  # Anello 1: contatto avvenuto (fuori dal sistema, segnato a mano)
 
 
 class OpportunityType(str, enum.Enum):

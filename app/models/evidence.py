@@ -25,9 +25,10 @@ change call to call even for the same provider.
 """
 from __future__ import annotations
 
+import uuid
 from datetime import datetime
 
-from sqlalchemy import DateTime, Numeric, String
+from sqlalchemy import DateTime, ForeignKey, Integer, LargeBinary, Numeric, String
 from sqlalchemy.orm import Mapped, mapped_column
 
 from app.models.base import Base, CreatedAtMixin, UUIDPrimaryKeyMixin
@@ -49,3 +50,21 @@ class Evidence(UUIDPrimaryKeyMixin, CreatedAtMixin, Base):
     observed_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
     provider: Mapped[str | None] = mapped_column(String(100), nullable=True, index=True)
     acquisition_method: Mapped[str | None] = mapped_column(String(20), nullable=True)  # AcquisitionMethod
+
+
+class EvidenceFile(UUIDPrimaryKeyMixin, CreatedAtMixin, Base):
+    """Anello 1 (2026-10-14): copia binaria di un'evidenza visiva (oggi
+    solo gli screenshot delle schede dei venditori target). Lo scraper gira
+    sul PC di casa ma l'interfaccia gira sul server OVH: senza questa
+    tabella lo screenshot esisterebbe solo sul disco del PC. Solo target,
+    JPEG ~100-200 KB: il volume resta piccolo."""
+
+    __tablename__ = "evidence_files"
+
+    listing_id: Mapped[uuid.UUID | None] = mapped_column(
+        ForeignKey("amazon_listings.id", ondelete="CASCADE"), nullable=True, index=True
+    )
+    kind: Mapped[str] = mapped_column(String(30))  # "screenshot"
+    content_type: Mapped[str] = mapped_column(String(50))
+    data: Mapped[bytes] = mapped_column(LargeBinary)
+    size_bytes: Mapped[int] = mapped_column(Integer)

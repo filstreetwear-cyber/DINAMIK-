@@ -1,0 +1,25 @@
+<!doctype html>
+<html lang="it">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Accesso — Dinamik Advisor</title>
+  <link rel="stylesheet" href="/ui/static/style.css">
+</head>
+<body>
+  <main class="wrap">
+    <div class="card login">
+      <h1>Dinamik Advisor</h1>
+      {% if flash_error %}<div class="flash error">{{ flash_error }}</div>{% endif %}
+      <form method="post" action="/ui/login" class="grid">
+        <label>Il tuo nome<br><input class="wide" type="text" name="name" required placeholder="es. Frank"></label>
+        {% if needs_key %}
+        <label>Chiave di accesso<br><input class="wide" type="password" name="key" required></label>
+        {% endif %}
+        <button class="primary" type="submit">Entra</button>
+        <p class="muted small">Il nome viene registrato accanto a ogni approvazione o modifica.</p>
+      </form>
+    </div>
+  </main>
+</body>
+</html>

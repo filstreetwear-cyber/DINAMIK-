@@ -69,7 +69,10 @@ from app.models.ai_recommendation import AIRecommendation as AIRecommendationRow
 from app.models.enums import ErrorCategory, OpportunityLevel, OpportunityType
 from app.services.ai_analysis_engine import _evidence_for_brand, _to_ai_evidence_input
 
-_ACTIONABLE_OPPORTUNITY_TYPES = frozenset({OpportunityType.AMAZON.value, OpportunityType.WEBSITE.value})
+# LISTING aggiunto con l'Anello 1 (2026-10-14): è l'opportunità più vendibile.
+_ACTIONABLE_OPPORTUNITY_TYPES = frozenset(
+    {OpportunityType.AMAZON.value, OpportunityType.WEBSITE.value, OpportunityType.LISTING.value}
+)
 _ACTIONABLE_LEVELS = frozenset({OpportunityLevel.HIGH.value, OpportunityLevel.MEDIUM.value})
 
 

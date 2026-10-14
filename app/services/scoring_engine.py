@@ -86,10 +86,10 @@ from app.models import (
     ErrorLog,
     Evidence,
     Opportunity,
-    ResearchResult,
     Score,
 )
 from app.models.enums import ErrorCategory, OpportunityLevel
+from app.services.brand_evidence import brand_evidence_condition
 
 _INCOMPLETE_DATA_RULE = "insufficient_product_data"  # opportunity_engine.py's own sentinel rule name
 _CONFIDENCE_FULL_DATA = 85.0
@@ -136,32 +136,11 @@ async def _latest_opportunities_by_type(session: AsyncSession, brand_id: uuid.UU
 
 
 async def _evidence_ids_for_brand(session: AsyncSession, brand_id: uuid.UUID) -> list[str]:
-    """Evidence is written against entity_type="research_result"
-    (app/agents/amazon_scout/discovery.py) -- this follows
-    ResearchResult.brand_id (set by Milestone 6's brand_resolution.py) to
-    find which research_result rows resolved onto this brand, then
-    collects the Evidence rows attached to those. A brand resolved from
-    zero research results (should not happen in practice, but not
-    impossible if data is manipulated directly) legitimately yields []."""
-    research_result_ids = (
-        (await session.execute(select(ResearchResult.id).where(ResearchResult.brand_id == brand_id)))
-        .scalars()
-        .all()
-    )
-    if not research_result_ids:
-        return []
-    entity_ids = [str(rid) for rid in research_result_ids]
-    evidence_ids = (
-        (
-            await session.execute(
-                select(Evidence.id).where(
-                    Evidence.entity_type == "research_result", Evidence.entity_id.in_(entity_ids)
-                )
-            )
-        )
-        .scalars()
-        .all()
-    )
+    """Evidence del brand da entrambe le catene: research_result (discovery
+    mock, Milestone 5/6) e product/seller/company/brand (scout live,
+    Anello 1) -- vedi app/services/brand_evidence.py."""
+    condition = await brand_evidence_condition(session, brand_id)
+    evidence_ids = (await session.execute(select(Evidence.id).where(condition))).scalars().all()
     return [str(eid) for eid in evidence_ids]
 
 
