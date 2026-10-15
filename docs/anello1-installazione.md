@@ -6,7 +6,25 @@ Ruoli:
 - **Collegamento**: Tailscale (gratuito). La porta 5432 di Postgres non va
   mai aperta su internet.
 
-Tempo stimato: 45–60 minuti la prima volta.
+Tempo stimato: 45–60 minuti la prima volta a mano, **~10 minuti con lo
+script automatico** per il server.
+
+## Scorciatoia: server OVH con un solo comando
+
+Fa da solo le sezioni 1 (lato server), 2, 3, 7, il backup notturno e la
+pianificazione della ricerca siti. L'unico passo interattivo è il login
+Tailscale.
+```bash
+curl -fsSL https://raw.githubusercontent.com/filstreetwear-cyber/DINAMIK-/claude/dinamik-advisor-scout-mvp-7no1zb/deploy/setup-server.sh -o setup-server.sh
+less setup-server.sh     # leggilo prima
+bash setup-server.sh     # --with-ollama per installare anche l'AI locale
+```
+Alla fine stampa la chiave dell'interfaccia e il `DATABASE_URL` da
+mettere nel `.env` del PC di casa. Se il repository è privato, il
+download con `curl` fallisce: clona con le tue credenziali GitHub e lancia
+`bash deploy/setup-server.sh` dalla cartella del clone.
+
+Il PC di casa va comunque installato a mano (sezioni 1 lato PC, 3, 4).
 
 ---
 
