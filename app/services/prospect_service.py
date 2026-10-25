@@ -30,6 +30,7 @@ from app.models import (
     AmazonSeller,
     Brand,
     Company,
+    Contact,
     ContactDraft,
     Evidence,
     EvidenceFile,
@@ -109,6 +110,7 @@ class ProspectDetail:
     drafts: list[ContactDraft]
     recommendations: list[AIRecommendation]
     status_history: list[ProspectStatus]
+    contacts: list[Contact] = field(default_factory=list)
 
     @property
     def status(self) -> str:
@@ -315,6 +317,13 @@ async def get_prospect(session: AsyncSession, brand_id: uuid.UUID, settings: Set
             )
         ).scalars()
     )
+    contacts = list(
+        (
+            await session.execute(
+                select(Contact).where(Contact.brand_id == brand.id).order_by(Contact.created_at)
+            )
+        ).scalars()
+    )
     recommendations = list(
         (
             await session.execute(
@@ -344,6 +353,7 @@ async def get_prospect(session: AsyncSession, brand_id: uuid.UUID, settings: Set
         drafts=drafts,
         recommendations=recommendations,
         status_history=status_history,
+        contacts=contacts,
     )
 
 

@@ -74,6 +74,7 @@ scan_app = typer.Typer(help="Run and inspect the weekly intelligence scan.")
 export_app = typer.Typer(help="Export data to spreadsheets for the internal team.")
 scout_app = typer.Typer(help="Anello 1: scout live su Amazon.it (da lanciare dal PC di casa).")
 websites_app = typer.Typer(help="Ricerca del sito ufficiale dei brand (P.IVA in home page).")
+contacts_app = typer.Typer(help="Email e telefono dell'azienda dal sito confermato.")
 
 app.add_typer(jobs_app, name="jobs")
 app.add_typer(brands_app, name="brands")
@@ -82,6 +83,7 @@ app.add_typer(scan_app, name="scan")
 app.add_typer(export_app, name="export")
 app.add_typer(scout_app, name="scout")
 app.add_typer(websites_app, name="websites")
+app.add_typer(contacts_app, name="contacts")
 
 
 @app.command()
@@ -600,6 +602,32 @@ async def _websites_discover_async(*, max_brands: int, lighthouse: bool) -> None
     typer.echo(f"confirmed: {summary.confirmed}  possible: {summary.possible}  not_found: {summary.not_found}")
     for d in summary.details:
         typer.echo(f"  {d['brand']}: {d['result']} {d.get('url', '')}")
+
+
+@contacts_app.command("discover")
+def contacts_discover(
+    max_brands: int = typer.Option(50, help="Massimo brand da controllare in questo giro."),
+) -> None:
+    """Per i brand con sito confermato e senza contatti: legge home e pagine
+    contatti/chi siamo e salva email e telefoni pubblicati. Nessun invio."""
+    asyncio.run(_contacts_discover_async(max_brands=max_brands))
+
+
+async def _contacts_discover_async(*, max_brands: int) -> None:
+    from app.services.contact_discovery import run_contact_discovery
+
+    settings = get_settings()
+    engine, factory = _session_factory(settings)
+    try:
+        async with factory() as session:
+            summary = await run_contact_discovery(session, max_brands=max_brands)
+            await session.commit()
+    finally:
+        await engine.dispose()
+    typer.echo(f"brands_considered: {summary.brands_considered}")
+    typer.echo(f"brands_with_contacts: {summary.brands_with_contacts}  contacts_created: {summary.contacts_created}")
+    for d in summary.details:
+        typer.echo(f"  {d['brand']}: {d['contacts']}")
 
 
 if __name__ == "__main__":

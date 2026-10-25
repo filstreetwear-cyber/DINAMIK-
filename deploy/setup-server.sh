@@ -110,7 +110,7 @@ sudo systemctl restart dinamik-web
 step "6/8 Backup notturno del database"
 mkdir -p "${APP_DIR}/logs"
 BACKUP_LINE="17 3 * * * ${APP_DIR}/deploy/backup-db.sh >> ${APP_DIR}/logs/backup.log 2>&1"
-WEBSITES_LINE="7 6 * * * cd ${APP_DIR} && .venv/bin/dinamik websites discover --max-brands 50 >> logs/websites.log 2>&1"
+WEBSITES_LINE="7 6 * * * cd ${APP_DIR} && .venv/bin/dinamik websites discover --max-brands 50 >> logs/websites.log 2>&1 && .venv/bin/dinamik contacts discover --max-brands 50 >> logs/contacts.log 2>&1"
 ( { crontab -l 2>/dev/null || true; } | { grep -v -e 'backup-db.sh' -e 'dinamik websites discover' || true; }; echo "${BACKUP_LINE}"; echo "${WEBSITES_LINE}" ) | crontab -
 "${APP_DIR}/deploy/backup-db.sh" && echo "primo backup creato in \$HOME/backups"
 

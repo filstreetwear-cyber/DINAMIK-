@@ -45,6 +45,7 @@ _HERE = Path(__file__).parent
 templates = Jinja2Templates(directory=str(_HERE / "templates"))
 templates.env.globals["STATUS_LABELS"] = STATUS_LABELS
 templates.env.filters["issue_text"] = lambda raw: describe_issue(raw)["problem"]
+templates.env.filters["urlquote"] = lambda value: quote(str(value or ""), safe="")
 
 router = APIRouter(prefix="/ui", include_in_schema=False)
 
@@ -201,6 +202,24 @@ async def prospect_draft(
     await save_draft_edit(session, brand_id, subject=subject, body=body, changed_by=user)
     await session.commit()
     return _back(f"/ui/prospects/{brand_id}", msg="Bozza salvata")
+
+
+@router.post("/prospects/{brand_id}/contacts")
+async def prospect_contacts(brand_id: uuid.UUID, session: SessionDep, user: UserDep) -> Response:
+    from app.models import Brand, Company
+    from app.services.contact_discovery import discover_contacts, save_contacts
+
+    brand = await session.get(Brand, brand_id)
+    if brand is None or not brand.website:
+        return _back(f"/ui/prospects/{brand_id}", err="Serve prima un sito confermato")
+    company = await session.get(Company, brand.company_id) if brand.company_id else None
+    exclude = {company.vat_number} if company and company.vat_number else set()
+    result = await discover_contacts(brand.website, exclude_digits=exclude)
+    created = await save_contacts(session, brand, result.contacts)
+    await session.commit()
+    if not result.pages_read:
+        return _back(f"/ui/prospects/{brand_id}", err="Sito non raggiungibile")
+    return _back(f"/ui/prospects/{brand_id}", msg=f"{created} contatti nuovi da {len(result.pages_read)} pagine")
 
 
 @router.post("/prospects/{brand_id}/website")

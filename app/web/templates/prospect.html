@@ -86,6 +86,8 @@
         <textarea name="body" required placeholder="Scrivi o genera una bozza">{{ draft.body if draft else '' }}</textarea>
         <div class="actions">
           <button type="submit" class="primary">Salva bozza</button>
+          {% set to = (d.contacts | selectattr('email') | rejectattr('role', 'equalto', 'pec') | map(attribute='email') | first) if d.contacts else none %}
+          {% if draft %}<a class="btn" href="mailto:{{ to or '' }}?subject={{ draft.subject | urlquote }}&body={{ draft.body | urlquote }}">Apri nella mia email</a>{% endif %}
           {% if draft %}<span class="muted small">Ultima versione: {{ 'modificata da ' ~ draft.model[5:] if draft.provider == 'human' else 'generata da AI (' ~ draft.model ~ ')' }} il {{ draft.created_at.strftime('%d/%m/%Y %H:%M') }}</span>{% endif %}
         </div>
       </form>
@@ -145,6 +147,19 @@
         <dt>Indirizzo</dt><dd>{{ (d.company.address or '—') | replace('\n', ', ') }}</dd>
       </dl>
       {% else %}<p class="muted small">Nessuna P.IVA trovata o non ancora verificata su VIES.</p>{% endif %}
+      <h3 style="margin-top: 14px;">Contatti pubblicati sul sito</h3>
+      {% if d.contacts %}
+      <ul class="small" style="padding-left: 18px;">
+        {% for c in d.contacts %}
+          <li>{% if c.email %}<a href="mailto:{{ c.email }}">{{ c.email }}</a>{% else %}<a href="tel:{{ c.phone | replace(' ', '') }}">{{ c.phone }}</a>{% endif %}
+            <span class="badge {{ 'NEEDS_REVIEW' if c.role == 'personal' else 'NONE' }}">{{ {'role': 'aziendale', 'personal': 'personale', 'pec': 'PEC', 'landline': 'fisso', 'mobile': 'cellulare'}.get(c.role, c.role) }}</span></li>
+        {% endfor %}
+      </ul>
+      <p class="muted small">"Personale" = indirizzo di una persona: dato personale (GDPR). Preferisci le caselle aziendali.</p>
+      {% else %}<p class="muted small">Nessun contatto ancora.</p>{% endif %}
+      {% if d.brand.website %}
+      <form method="post" action="/ui/prospects/{{ d.brand.id }}/contacts"><button type="submit">Cerca contatti sul sito</button></form>
+      {% endif %}
       <h3 style="margin-top: 14px;">Venditori Amazon</h3>
       <ul class="small" style="padding-left: 18px;">
         {% for s in d.sellers %}

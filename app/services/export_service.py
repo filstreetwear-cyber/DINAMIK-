@@ -109,6 +109,8 @@ _COLUMNS: tuple[str, ...] = (
     "P.IVA",
     "VIES valid",
     "Company address",
+    "Company email",
+    "Company phone",
 )
 
 
@@ -134,6 +136,8 @@ class BrandExportRow:
     vat: str | None = None
     vies_valid: bool | None = None
     company_address: str | None = None
+    company_email: str | None = None
+    company_phone: str | None = None
 
     def as_worksheet_row(self) -> list[Any]:
         amazon = self.opportunities.get(OpportunityType.AMAZON.value, {})
@@ -169,6 +173,8 @@ class BrandExportRow:
             self.vat,
             self.vies_valid,
             self.company_address,
+            self.company_email,
+            self.company_phone,
         ]
 
 
@@ -337,6 +343,8 @@ async def build_brand_export_rows(
                 vat=f"{company.vat_country}{company.vat_number}" if company and company.vat_number else None,
                 vies_valid=company.vies_valid if company else None,
                 company_address=company.address if company else None,
+                company_email=company.email if company else None,
+                company_phone=company.phone if company else None,
             )
         )
     return rows

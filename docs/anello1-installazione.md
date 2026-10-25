@@ -185,6 +185,22 @@ nome nel titolo lo segna come "possibile": lo confermi a mano dalla scheda
 prospect. Con `--lighthouse` aggiunge velocità e SEO (serve
 `npm install -g lighthouse`).
 
+### 8b. Email e telefono dell'azienda
+
+```bash
+dinamik contacts discover --max-brands 50
+```
+Per i brand con sito confermato legge la home e fino a 3 pagine
+"contatti / chi siamo / note legali" e salva email e telefoni pubblicati.
+Scarta P.IVA e codici fiscali scambiati per numeri, indirizzi tecnici
+(wix, sentry, esempi) e domini estranei. Ogni email è marcata
+**aziendale** (info@, commerciale@...), **personale** (nome.cognome@: dato
+personale, GDPR) o **PEC**. Dalla scheda prospect: pulsante "Cerca
+contatti sul sito" e, sulla bozza, "Apri nella mia email" (apre il tuo
+programma di posta con destinatario, oggetto e testo già compilati: l'invio
+resta tuo). Lo script del server lo pianifica ogni mattina dopo la ricerca
+siti.
+
 ## 9. AI locale (server OVH, facoltativo)
 
 Serve solo per "Genera raccomandazioni e bozza con AI". Tutto il resto

@@ -9,4 +9,5 @@
 
 # --- Server OVH ------------------------------------------------------------
 # Ogni giorno alle 6:07: cerca il sito ufficiale dei nuovi brand con P.IVA.
-7 6 * * *  cd ~/DINAMIK- && .venv/bin/dinamik websites discover --max-brands 50 >> logs/websites.log 2>&1
+# Subito dopo: email e telefono pubblicati sui siti appena confermati.
+7 6 * * *  cd ~/DINAMIK- && .venv/bin/dinamik websites discover --max-brands 50 >> logs/websites.log 2>&1 && .venv/bin/dinamik contacts discover --max-brands 50 >> logs/contacts.log 2>&1

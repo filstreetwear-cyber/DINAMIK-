@@ -157,3 +157,30 @@ def test_login_required_when_key_configured(client: TestClient, monkeypatch: pyt
     assert r.status_code == 303
     assert client.get("/ui").status_code == 200
     assert client.get("/ui/logout", follow_redirects=False).status_code == 303
+
+
+async def _add_contact(brand_id: str) -> None:
+    import uuid as _uuid
+
+    from app.models import Contact
+
+    engine = create_async_engine(get_settings().database_url)
+    factory = async_sessionmaker(bind=engine, expire_on_commit=False)
+    async with factory() as s:
+        s.add(Contact(brand_id=_uuid.UUID(brand_id), email="info@casabella.it", role="role", source="website"))
+        s.add(Contact(brand_id=_uuid.UUID(brand_id), email="mario.rossi@casabella.it", role="personal",
+                      source="website"))
+        await s.commit()
+    await engine.dispose()
+
+
+def test_contacts_card_and_mailto(client: TestClient):
+    brand_id = _brand_id(client)
+    asyncio.run(_add_contact(brand_id))
+    client.post(f"/ui/prospects/{brand_id}/draft", data={"subject": "Le sue schede", "body": "Buongiorno, ..."})
+    page = client.get(f"/ui/prospects/{brand_id}").text
+    assert "info@casabella.it" in page and "personale" in page
+    assert 'href="mailto:info@casabella.it?subject=Le%20sue%20schede&body=Buongiorno%2C%20...' in page
+    # Senza sito confermato il pulsante non c'è e l'azione rifiuta con un messaggio.
+    r = client.post(f"/ui/prospects/{brand_id}/contacts", follow_redirects=False)
+    assert r.status_code == 303 and "err=" in r.headers["location"]

@@ -228,3 +228,17 @@ Chiusi nel codice i due gap di ingestion Amazon (Fase 2) e la regola
   systemd ed esempi cron.
 - Nuovo stato prospect `CONTACTED`.
 - Baseline nuova: **389 passed, 3 skipped**, ruff pulito, mypy ai 3 errori noti.
+
+## Aggiornamento 2026-10-25 — contatti dal sito
+
+- `app/services/contact_discovery.py` + `dinamik contacts discover`: primo
+  writer della tabella `contacts`. Email/telefoni da home e pagine
+  contatti del sito confermato, con classificazione aziendale/personale/PEC
+  e Evidence per pagina. Bug evitato in sviluppo: la P.IVA in footer veniva
+  letta come numero di telefono (esclusione per contesto + P.IVA nota).
+- Interfaccia: contatti nella scheda azienda, pulsante "Cerca contatti sul
+  sito", link "Apri nella mia email" sulla bozza (mailto precompilato).
+- Export: colonne Company email / Company phone. Cron del server: contatti
+  subito dopo la ricerca siti.
+- Baseline: **397 passed, 3 skipped**, ruff pulito, mypy ai 3 errori noti.
+- Ancora nessun run reale su Amazon.it registrato nel repo.
