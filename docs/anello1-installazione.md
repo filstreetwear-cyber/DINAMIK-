@@ -24,7 +24,13 @@ mettere nel `.env` del PC di casa. Se il repository è privato, il
 download con `curl` fallisce: clona con le tue credenziali GitHub e lancia
 `bash deploy/setup-server.sh` dalla cartella del clone.
 
-Il PC di casa va comunque installato a mano (sezioni 1 lato PC, 3, 4).
+PC di casa, sempre con un comando (rilanciabile):
+- Windows (PowerShell): `Set-ExecutionPolicy -Scope Process Bypass` poi
+  `.\deploy\setup-home-pc.ps1`
+- Linux/macOS: `bash deploy/setup-home-pc.sh`
+
+Se vuoi che lo faccia Claude: apri Claude Code **sul PC di casa** e
+incollagli `docs/prompt-claude-locale.md`.
 
 ---
 
